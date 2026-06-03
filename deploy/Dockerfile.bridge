@@ -1,0 +1,22 @@
+# Bridge image: reconcile/backfill CKAN -> PgSTAC, and run pgstac migrations.
+# Build context is the repo root: `docker build -f deploy/Dockerfile.bridge .`
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates bash \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Shares the API requirements (pulls psycopg via pypgstac[psycopg], plus ckanapi/httpx).
+COPY requirements-api.txt /app/requirements-api.txt
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY stacmap /app/stacmap
+COPY bridge /app/bridge
+COPY pgstac /app/pgstac
+
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+
+# Default to a no-arg reconcile help; the pod cron / Tapis cron passes the dataset(s).
+ENTRYPOINT ["python", "-m", "bridge.cli"]

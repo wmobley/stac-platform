@@ -1,0 +1,22 @@
+# STAC API image (stac-fastapi-pgstac) for the stac-api Tapis pod.
+# Build context is the repo root: `docker build -f deploy/Dockerfile.api .`
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates bash \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements-api.txt /app/requirements-api.txt
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+COPY stacmap /app/stacmap
+COPY stac_api /app/stac_api
+COPY pgstac /app/pgstac
+
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+EXPOSE 8081
+
+# Config (PG*, STAC_*, CORS) comes from the pod environment. No .env baked in.
+CMD ["uvicorn", "stac_api.app:app", "--host", "0.0.0.0", "--port", "8081"]

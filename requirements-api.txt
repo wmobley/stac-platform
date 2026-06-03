@@ -1,0 +1,19 @@
+# Runtime deps shared by the STAC API, the bridge, and the publish task.
+# (Small enough that one file keeps local setup simple; the deploy Dockerfiles
+# install the same set.)
+
+# STAC API server + its PgSTAC backend
+stac-fastapi-pgstac>=3.0.0
+pypgstac[psycopg]>=0.8.5
+uvicorn[standard]>=0.30
+# stac-fastapi pulls fastapi/pydantic, but pin the floor we rely on:
+fastapi>=0.110
+
+# CKAN client used by the publish task and the bridge
+ckanapi>=4.7
+
+# HTTP client for the publish task's STAC Transactions calls
+httpx>=0.27
+
+# config loading
+python-dotenv>=1.0

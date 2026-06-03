@@ -1,0 +1,41 @@
+# Local test harness for the STAC API.
+#
+#   docker compose up -d db
+#   docker compose run --rm stac-api python -m pgstac.migrate   # one-time: install pgstac schema
+#   docker compose up stac-api                                   # serve on http://localhost:8081
+#
+# Writes are UNPROTECTED here (STAC_WRITE_TOKEN unset) so you can PUT items
+# without a token while testing. Do not use this compose in production.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: stac
+      POSTGRES_PASSWORD: stac
+      POSTGRES_DB: stac
+    ports:
+      - "5439:5432"          # host 5439 -> container 5432 (avoids a local PG clash)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stac -d stac"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  stac-api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: stac
+      PGUSER: stac
+      PGPASSWORD: stac
+      PGSSLMODE: disable        # plaintext is fine inside the compose network
+      STAC_CORS_ORIGINS: "http://localhost:5174,http://localhost:8081"
+      # STAC_WRITE_TOKEN: leave unset -> Transactions open for local testing
+    ports:
+      - "8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
