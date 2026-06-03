@@ -1,23 +1,13 @@
-"""Reusable dual-write publish task: CKAN + STAC, in one step.
+"""Dual-write a granule to CKAN + the STAC API.
+
+This is the single source of the publish logic, reused by:
+  * the Tapis Workflows ``stac-publish`` FunctionTask (pip-installs this package),
+  * any CLI / in-process caller.
 
 At publish time we already hold the manifest (bbox/dates), the rendered artifacts
-(COG, overlay), and — after upload — the public CKAN URLs. So we write the STAC
-Item synchronously: no polling lag, the granule is searchable immediately.
-
-Order: **CKAN first, STAC second.** If the STAC write fails, the granule still
-lives in CKAN and the reconcile bridge will pick it up — CKAN stays the source of
-truth.
-
-Usage (args override the matching CKAN_*/STAC_* env vars)::
-
-    python -m tasks.publish.publish \
-        --collection subsidence-rates --item-id job-123 \
-        --manifest run-manifest.json \
-        --cog disp_displacement.tif --overlay disp_overlay.png
-
-Everything but --collection/--item-id/--manifest is optional. Source NetCDF links
-are taken from the manifest's ``product_urls`` and registered as CKAN link
-resources (not uploaded).
+(COG, overlay), and — after upload — the public CKAN URLs, so the STAC Item is
+written synchronously (no polling lag). **CKAN first, STAC second**: if the STAC
+write fails the granule still lives in CKAN and the reconcile bridge picks it up.
 """
 
 from __future__ import annotations
@@ -27,11 +17,11 @@ import os
 import sys
 from pathlib import Path
 
-from stacmap import assets as A
-from stacmap import stac
-from stacmap.ckan import CkanClient
-from stacmap.manifest import Granule, load_granule
-from stacmap.stac_client import StacClient
+from . import assets as A
+from . import stac
+from .ckan import CkanClient
+from .manifest import Granule, load_granule
+from .stac_client import StacClient
 
 
 def publish_granule(
@@ -52,9 +42,7 @@ def publish_granule(
     item_id = granule.item_id
 
     # 1. CKAN: ensure the dataset (= Collection) and upload/link the assets.
-    ckan.ensure_dataset(
-        collection_id, title=collection_title, notes=collection_description
-    )
+    ckan.ensure_dataset(collection_id, title=collection_title, notes=collection_description)
     item_assets: dict[str, dict] = {}
 
     def _upload(path: str | Path, *, display_range=None) -> None:
@@ -68,8 +56,7 @@ def publish_granule(
         _upload(cog_path, display_range=granule.display_range)
     if overlay_path:
         _upload(overlay_path)
-    # The manifest itself becomes the `metadata` asset and the bridge's source of truth.
-    _upload(manifest_path)
+    _upload(manifest_path)  # manifest -> `metadata` asset + the bridge's source of truth
     for extra in extra_files or []:
         _upload(extra)
 
@@ -78,21 +65,16 @@ def publish_granule(
         res = ckan.link_resource(collection_id, url, item_id=item_id)
         key = "source" if i == 0 else f"source_{i:04d}"
         item_assets[key] = A.make_asset(
-            res.get("url", url),
-            title=os.path.basename(url),
-            media_type=A.NETCDF_MEDIA_TYPE,
-            roles=["data", "source"],
+            res.get("url", url), title=os.path.basename(url),
+            media_type=A.NETCDF_MEDIA_TYPE, roles=["data", "source"],
         )
 
     # 2. STAC: ensure the Collection, then PUT the Item (idempotent upsert).
     item = stac.build_item(granule, collection_id, item_assets)
     stac_client = stac_client or StacClient()
     collection = stac.build_collection(
-        collection_id,
-        title=collection_title,
-        description=collection_description,
-        spatial_bbox=granule.bbox,
-        temporal_interval=stac.union_interval([granule]),
+        collection_id, title=collection_title, description=collection_description,
+        spatial_bbox=granule.bbox, temporal_interval=stac.union_interval([granule]),
     )
     stac_client.ensure_collection(collection)
     stac_client.upsert_item(collection_id, item)
@@ -113,12 +95,8 @@ def main(argv=None) -> int:
 
     granule = load_granule(args.manifest, args.item_id)
     item = publish_granule(
-        collection_id=args.collection,
-        granule=granule,
-        manifest_path=args.manifest,
-        cog_path=args.cog,
-        overlay_path=args.overlay,
-        extra_files=args.extra,
+        collection_id=args.collection, granule=granule, manifest_path=args.manifest,
+        cog_path=args.cog, overlay_path=args.overlay, extra_files=args.extra,
         collection_title=args.collection_title,
         collection_description=args.collection_description,
     )

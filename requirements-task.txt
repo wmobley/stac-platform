@@ -1,5 +1,0 @@
-# Slim deps for the publish task image — it only talks HTTP to CKAN + STAC, so it
-# needs neither stac-fastapi nor pypgstac (keeps the batch-app image small).
-ckanapi>=4.7
-httpx>=0.27
-python-dotenv>=1.0

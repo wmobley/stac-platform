@@ -31,28 +31,33 @@ PgSTAC ◄──► stac-fastapi-pgstac  (/, /collections, /search, transactions
 
 | Path | What |
 |------|------|
-| `stacmap/` | Shared core: manifest→granule, asset/role inference, STAC Item/Collection builders, CKAN + STAC HTTP clients. Imported by both the task and the bridge. |
+| `stacmap/` | Shared core: manifest→granule, asset/role inference, STAC Item/Collection builders, CKAN + STAC HTTP clients, and `publish.py` (the **dual-write** entrypoint). Imported by the publish step and the bridge. |
 | `stac_api/` | Thin launcher around `stac-fastapi-pgstac` (reads config, enables extensions + Transactions). |
-| `tasks/publish/` | Reusable, containerized **dual-write** task (CKAN + STAC). Ships as a Tapis app. |
 | `bridge/` | Reconcile / backfill CKAN → PgSTAC (CLI; runs on a schedule). |
 | `pgstac/` | `pypgstac migrate` runner + bootstrap notes. |
 | `deploy/` | Dockerfiles, `register_pods.py`, env sample. |
 
+Publishing runs as a **lightweight Tapis Workflows FunctionTask** (`python:3.11`,
+`pip install git+…stac-platform`, no image) — see `stac-publish` in
+[SUBSIDE's pipeline](https://github.com/wmobley/subside) and `stacmap/publish.py`.
+This repo is pip-installable (`pyproject.toml`) so that task can install it.
+
 ## Quick start (local)
 
 ```bash
-cp .env.sample .env            # fill in PGSTAC_*, CKAN_URL/TOKEN, STAC_URL/TOKEN
+cp .env.sample .env            # fill in PG*, CKAN_URL/TOKEN, STAC_URL/TOKEN
 python -m venv .venv && . .venv/bin/activate
-pip install -r requirements-api.txt          # API + bridge + tasks share deps
+pip install -r requirements-api.txt          # API + bridge
+pip install -e .                              # the stacmap library (publish core)
 
 # 1. bring up a pgstac Postgres (any Postgres ≥ 14 with the pgstac schema)
-python -m pgstac.migrate                      # runs pypgstac migrate against PGSTAC_*
+python -m pgstac.migrate                      # runs pypgstac migrate against PG*
 
 # 2. run the STAC API
 uvicorn stac_api.app:app --reload --port 8081
 
 # 3. dual-write a granule (CKAN + STAC) from a SUBSIDE manifest
-python -m tasks.publish.publish \
+python -m stacmap.publish \
   --collection subsidence-rates --item-id job-123 \
   --manifest ./run-manifest.json \
   --cog ./disp_displacement.tif --overlay ./disp_overlay.png

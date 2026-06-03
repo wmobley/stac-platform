@@ -1,0 +1,4 @@
+# Control-plane deps for deploy/register_pods.py (NOT baked into runtime images —
+# pod registration is an admin step, not something the pod itself does).
+tapipy>=1.2
+python-dotenv>=1.0

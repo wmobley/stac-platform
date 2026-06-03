@@ -70,5 +70,9 @@ Mirrors SUBSIDE: GHCR images via GitHub Actions, registered as Tapis pods with
 
 - `stac-api` pod — `stac-fastapi-pgstac` (`:8081`).
 - `stacpostgres` pod — PgSTAC Postgres (its own pod; not shared with `subsidepostgres`).
-- `stac-publish` — image for the reusable Tapis batch app (no long-running pod).
+- `stac-bridge` image — the reconcile/backfill CLI (scheduled; no long-running pod).
+- **publish** — no image: a lightweight Tapis Workflows **FunctionTask** that
+  `pip install git+…stac-platform` and calls `stacmap.publish`. The orchestrator
+  (which holds Tapis creds) fetches the `tapis://` COG/overlay/manifest and the
+  task dual-writes to CKAN + STAC.
 - later: `stac-titiler` pod — TiTiler-PgSTAC for dynamic tiles/mosaics.

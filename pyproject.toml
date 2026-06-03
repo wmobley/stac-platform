@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stac-platform"
+version = "0.1.0"
+description = "Project-agnostic STAC API beside CKAN, plus the CKAN+STAC dual-write publish core."
+requires-python = ">=3.9"
+# Runtime deps for the *publish* path (what a Workflows FunctionTask installs):
+# the STAC API/bridge pull their heavier deps from requirements-api.txt.
+dependencies = [
+    "ckanapi>=4.7",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+stac-publish = "stacmap.publish:main"
+
+[tool.setuptools]
+# The reusable library. A Workflows FunctionTask only needs `stacmap`;
+# bridge/stac_api/pgstac are included so `pip install` of the repo is whole.
+packages = ["stacmap", "bridge", "stac_api", "pgstac"]

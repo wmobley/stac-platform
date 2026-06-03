@@ -1,7 +1,8 @@
 name: Build stac-platform images
 
-# Builds the STAC API, bridge, and publish-task images and pushes them to GHCR.
-# Modeled on SUBSIDE's build-services.yml.
+# Builds the STAC API + reconcile-bridge images and pushes them to GHCR.
+# (The publish step is a lightweight Tapis Workflows FunctionTask that pip-installs
+# this repo — `pip install git+...stac-platform` — so it needs no image.)
 
 on:
   push:
@@ -10,9 +11,9 @@ on:
       - "stacmap/**"
       - "stac_api/**"
       - "bridge/**"
-      - "tasks/**"
       - "pgstac/**"
       - "requirements-*.txt"
+      - "pyproject.toml"
       - "deploy/**"
       - ".github/workflows/build.yml"
   pull_request:
@@ -45,8 +46,6 @@ jobs:
             dockerfile: deploy/Dockerfile.api
           - image: stac-bridge
             dockerfile: deploy/Dockerfile.bridge
-          - image: stac-publish
-            dockerfile: tasks/publish/Dockerfile
 
     steps:
       - uses: actions/checkout@v4
