@@ -1,18 +1,20 @@
 """Dual-write a granule to CKAN + the STAC API.
 
-This is the single source of the publish logic, reused by:
-  * the Tapis Workflows ``stac-publish`` FunctionTask (pip-installs this package),
-  * any CLI / in-process caller.
+Single source of the publish logic, reused by the Tapis Workflows ``stac-publish``
+FunctionTask (pip-installs this package) and any CLI / orchestrator caller.
 
-At publish time we already hold the manifest (bbox/dates), the rendered artifacts
-(COG, overlay), and — after upload — the public CKAN URLs, so the STAC Item is
-written synchronously (no polling lag). **CKAN first, STAC second**: if the STAC
-write fails the granule still lives in CKAN and the reconcile bridge picks it up.
+Handles both SUBSIDE pipelines via :func:`stacmap.manifest.parse_manifest`:
+  * **H2I** — one displacement COG + a PNG overlay.
+  * **WERC** — two COGs (cumulative + velocity), each with its own value range.
+
+CKAN first, STAC second: if the STAC write fails the granule still lives in CKAN
+and the reconcile bridge picks it up.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -20,46 +22,46 @@ from pathlib import Path
 from . import assets as A
 from . import stac
 from .ckan import CkanClient
-from .manifest import Granule, load_granule
+from .manifest import CogSpec, Granule, parse_manifest
 from .stac_client import StacClient
 
 
-def publish_granule(
+def publish_item(
     *,
     collection_id: str,
     granule: Granule,
-    manifest_path: str | Path,
-    cog_path: str | Path | None = None,
-    overlay_path: str | Path | None = None,
-    extra_files: list[str | Path] | None = None,
+    cog_files: list[tuple[str, CogSpec]],
+    overlay_path: str | None = None,
+    manifest_path: str | None = None,
     ckan: CkanClient | None = None,
     stac_client: StacClient | None = None,
     collection_title: str | None = None,
     collection_description: str | None = None,
 ) -> dict:
-    """Upload artifacts to CKAN, then build + upsert the STAC Item. Returns the Item."""
+    """Upload the given local files to CKAN, then build + upsert the STAC Item."""
     ckan = ckan or CkanClient()
     item_id = granule.item_id
-
-    # 1. CKAN: ensure the dataset (= Collection) and upload/link the assets.
     ckan.ensure_dataset(collection_id, title=collection_title, notes=collection_description)
+
     item_assets: dict[str, dict] = {}
-
-    def _upload(path: str | Path, *, display_range=None) -> None:
-        res = ckan.upload_resource(collection_id, str(path), item_id=item_id)
-        key, asset = A.asset_for_resource(
-            os.path.basename(str(path)), res["url"], display_range=display_range
+    for local_path, spec in cog_files:
+        res = ckan.upload_resource(collection_id, str(local_path), item_id=item_id)
+        item_assets[spec.key] = A.make_asset(
+            res["url"], title=spec.title or spec.filename,
+            media_type=A.COG_MEDIA_TYPE, roles=["data", "visual"],
+            display_range=spec.display_range,
         )
-        item_assets[key] = asset
-
-    if cog_path:
-        _upload(cog_path, display_range=granule.display_range)
     if overlay_path:
-        _upload(overlay_path)
-    _upload(manifest_path)  # manifest -> `metadata` asset + the bridge's source of truth
-    for extra in extra_files or []:
-        _upload(extra)
-
+        res = ckan.upload_resource(collection_id, str(overlay_path), item_id=item_id)
+        item_assets["overlay"] = A.make_asset(
+            res["url"], title=os.path.basename(str(overlay_path)),
+            media_type=A.PNG_MEDIA_TYPE, roles=["overlay", "visual"],
+        )
+    if manifest_path:
+        res = ckan.upload_resource(collection_id, str(manifest_path), item_id=item_id)
+        item_assets["metadata"] = A.make_asset(
+            res["url"], title="manifest", media_type=A.JSON_MEDIA_TYPE, roles=["metadata"],
+        )
     # Source NetCDFs: link-only resources -> `source` link assets (back-populatable).
     for i, url in enumerate(granule.source_urls):
         res = ckan.link_resource(collection_id, url, item_id=item_id)
@@ -69,7 +71,6 @@ def publish_granule(
             media_type=A.NETCDF_MEDIA_TYPE, roles=["data", "source"],
         )
 
-    # 2. STAC: ensure the Collection, then PUT the Item (idempotent upsert).
     item = stac.build_item(granule, collection_id, item_assets)
     stac_client = stac_client or StacClient()
     collection = stac.build_collection(
@@ -81,23 +82,48 @@ def publish_granule(
     return item
 
 
+def publish_from_dir(
+    *,
+    collection_id: str,
+    manifest_path: str | Path,
+    item_id: str,
+    files_dir: str | Path,
+    **kwargs,
+) -> dict:
+    """Parse a manifest, find its COG(s)/overlay in ``files_dir`` by name, publish.
+
+    Used when the artifacts have been staged locally (the orchestrator fetches the
+    tapis:// files into a temp dir; the hosted FunctionTask stages its inputs).
+    """
+    data = json.loads(Path(manifest_path).read_text())
+    granule, cogs, overlay = parse_manifest(data, item_id)
+    files_dir = Path(files_dir)
+    cog_files = [(str(files_dir / s.filename), s) for s in cogs if (files_dir / s.filename).exists()]
+    overlay_path = None
+    if overlay and (files_dir / overlay).exists():
+        overlay_path = str(files_dir / overlay)
+    return publish_item(
+        collection_id=collection_id, granule=granule, cog_files=cog_files,
+        overlay_path=overlay_path, manifest_path=str(manifest_path), **kwargs,
+    )
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Dual-write a granule to CKAN + STAC.")
     p.add_argument("--collection", required=True, help="CKAN dataset = STAC Collection id")
     p.add_argument("--item-id", required=True, help="STAC Item id (stac_item_id on resources)")
-    p.add_argument("--manifest", required=True, help="Path to the SUBSIDE run manifest JSON")
-    p.add_argument("--cog", help="Path to the displacement COG (.tif)")
-    p.add_argument("--overlay", help="Path to the PNG overlay")
-    p.add_argument("--extra", action="append", default=[], help="Extra file(s) to upload as assets")
+    p.add_argument("--manifest", required=True, help="Path to the run manifest JSON (H2I or WERC)")
+    p.add_argument("--files-dir", default=None,
+                   help="Directory holding the COG(s)/overlay named as in the manifest "
+                        "(default: the manifest's directory)")
     p.add_argument("--collection-title", default=os.environ.get("STAC_COLLECTION_TITLE"))
     p.add_argument("--collection-description", default=os.environ.get("STAC_COLLECTION_DESCRIPTION"))
     args = p.parse_args(argv)
 
-    granule = load_granule(args.manifest, args.item_id)
-    item = publish_granule(
-        collection_id=args.collection, granule=granule, manifest_path=args.manifest,
-        cog_path=args.cog, overlay_path=args.overlay, extra_files=args.extra,
-        collection_title=args.collection_title,
+    files_dir = args.files_dir or os.path.dirname(os.path.abspath(args.manifest))
+    item = publish_from_dir(
+        collection_id=args.collection, manifest_path=args.manifest, item_id=args.item_id,
+        files_dir=files_dir, collection_title=args.collection_title,
         collection_description=args.collection_description,
     )
     print(f"published item {item['id']} -> collection {args.collection}")

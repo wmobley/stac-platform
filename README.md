@@ -74,38 +74,58 @@ python -m bridge.cli reconcile --dataset subsidence-rates
 python tests/test_mapping.py        # or: python -m pytest tests/ -q
 ```
 
-**Full API, end-to-end with Docker** (recommended — avoids local Python/PgSTAC setup):
+**Two-pipeline publish test** (exercises the `stac-publish` path for BOTH H2I
+single-COG+overlay and WERC two-COG shapes against a running STAC; CKAN stubbed,
+so no credentials needed):
 
 ```bash
-docker compose up -d db                                    # PostGIS
-docker compose run --rm stac-api python -m pgstac.migrate   # install pgstac schema (once)
-docker compose up -d stac-api                              # serve on :8081
+docker compose up -d                                   # STAC on :8081, writes open
+STAC_URL=http://localhost:8081/api/v1 python tests/test_publish_pipelines.py
+```
 
-# smoke-test the endpoints
+(A *full* live pipeline run — HPC download + analysis — is
+`python tapis/workflows/orchestrate.py --pipeline {h2i,werc} --allocation <A>`
+with the publish env set.)
+
+**Full stack (API + React viewer), end-to-end with Docker** (recommended):
+
+The image is multi-stage (builds the `webui/` React app, then serves it from the
+API). The viewer is at `/`; the STAC API is under **`/api/v1`**. Compose sets
+`STAC_AUTH_DISABLED=true`, so writes are open locally (in prod, writes need a
+valid Tapis token).
+
+```bash
+docker compose up -d        # db -> migrate (one-shot) -> stac-api on :8081
+                            # the `migrate` service installs the pgstac schema first,
+                            # so a fresh DB (after `down -v`) just works.
+
+open http://localhost:8081/                  # the React viewer
 curl -s localhost:8081/healthz
-curl -s localhost:8081/                  | python -m json.tool   # landing page / conformance
-curl -s localhost:8081/collections       | python -m json.tool
+curl -s localhost:8081/api/v1/collections    | python -m json.tool
 
-# create a collection + item via the Transactions extension (writes are open locally)
-curl -s -X POST localhost:8081/collections \
+# create a collection + item via Transactions (open locally; prod needs a Tapis token)
+curl -s -X POST localhost:8081/api/v1/collections \
   -H 'Content-Type: application/json' \
-  -d '{"type":"Collection","stac_version":"1.0.0","id":"demo",
-       "description":"demo","license":"proprietary",
-       "extent":{"spatial":{"bbox":[[-180,-90,180,90]]},
-                 "temporal":{"interval":[[null,null]]}},"links":[]}'
+  -d '{"type":"Collection","stac_version":"1.0.0","id":"demo","description":"demo",
+       "license":"proprietary",
+       "extent":{"spatial":{"bbox":[[-180,-90,180,90]]},"temporal":{"interval":[[null,null]]}},
+       "links":[]}'
 
-curl -s -X PUT localhost:8081/collections/demo/items/item-1 \
+curl -s -X POST localhost:8081/api/v1/collections/demo/items \
   -H 'Content-Type: application/json' \
   -d '{"type":"Feature","stac_version":"1.0.0","id":"item-1","collection":"demo",
        "geometry":{"type":"Point","coordinates":[-95.4,29.6]},
        "bbox":[-95.4,29.6,-95.4,29.6],
        "properties":{"datetime":"2024-06-01T00:00:00Z"},"assets":{},"links":[]}'
 
-# search it back
-curl -s -X POST localhost:8081/search \
+curl -s -X POST localhost:8081/api/v1/search \
   -H 'Content-Type: application/json' \
   -d '{"collections":["demo"],"bbox":[-96,29,-95,30]}' | python -m json.tool
 ```
+
+In production (auth on), writes require `Authorization: Bearer <Tapis token>` —
+any valid Tapis user. Develop the UI with hot-reload via `cd webui && npm run dev`
+(vite on :5173, proxying `/api/v1` → :8081).
 
 `docker compose down -v` tears it down (the `-v` drops the database volume).
 

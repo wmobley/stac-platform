@@ -1,11 +1,11 @@
-# Local test harness for the STAC API.
+# Local test harness for the STAC API + React viewer.
 #
-#   docker compose up -d db
-#   docker compose run --rm stac-api python -m pgstac.migrate   # one-time: install pgstac schema
-#   docker compose up stac-api                                   # serve on http://localhost:8081
+#   docker compose up        # db -> migrate (one-shot) -> stac-api on :8081
 #
-# Writes are UNPROTECTED here (STAC_WRITE_TOKEN unset) so you can PUT items
-# without a token while testing. Do not use this compose in production.
+# The `migrate` service installs the pgstac schema before the API starts, so a
+# fresh DB (e.g. after `docker compose down -v`) just works. Writes are OPEN here
+# (STAC_AUTH_DISABLED=true) so you can register without a Tapis token while
+# testing. Do not use this compose in production.
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -21,6 +21,24 @@ services:
       timeout: 3s
       retries: 20
 
+  # One-shot: install/upgrade the pgstac schema, then exit. Idempotent.
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    command: ["python", "-m", "pgstac.migrate"]
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: stac
+      PGUSER: stac
+      PGPASSWORD: stac
+      PGSSLMODE: disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   stac-api:
     build:
       context: .
@@ -32,10 +50,13 @@ services:
       PGUSER: stac
       PGPASSWORD: stac
       PGSSLMODE: disable        # plaintext is fine inside the compose network
-      STAC_CORS_ORIGINS: "http://localhost:5174,http://localhost:8081"
-      # STAC_WRITE_TOKEN: leave unset -> Transactions open for local testing
+      STAC_CORS_ORIGINS: "http://localhost:5173,http://localhost:8081"
+      PREFIX_PATH: "/api/v1"     # API under /api/v1; React viewer served at /
+      STAC_AUTH_DISABLED: "true" # local: writes open (no Tapis token required)
     ports:
       - "8081:8081"
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

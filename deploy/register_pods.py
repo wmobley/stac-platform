@@ -4,7 +4,7 @@
 Creates:
   * stacpostgres  — a PgSTAC Postgres database pod (Tapis "postgres" template).
   * stac-api      — the stac-fastapi-pgstac service (custom GHCR image, :8081)
-                    at https://stac-api.pods.portals.tapis.io
+                    at https://stacapi.pods.portals.tapis.io
 
 Modeled on subside/tapis/register_pods.py. After `stacpostgres` is up, run the
 schema install once:  `python -m pgstac.migrate`  (with PG* pointed at the pod).
@@ -31,10 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ENV_KEYS = [
     "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
     "PGSSLMODE", "PGSSLNEGOTIATION",
-    "STAC_API_TITLE", "STAC_API_DESCRIPTION", "STAC_API_ROOT_PATH",
-    "STAC_CORS_ORIGINS", "STAC_WRITE_TOKEN",
+    "STAC_API_TITLE", "STAC_API_DESCRIPTION", "PREFIX_PATH",
+    "STAC_CORS_ORIGINS", "TAPIS_BASE_URL",
 ]
-SECRET_KEYS = {"PGPASSWORD", "STAC_WRITE_TOKEN"}
+SECRET_KEYS = {"PGPASSWORD"}
 
 
 def _load_dotenv() -> None:
@@ -51,15 +51,17 @@ def _pods_domain(base_url: str) -> str:
 
 def build_specs(owner: str, tag: str, base_url: str) -> dict[str, dict]:
     domain = _pods_domain(base_url)
-    api_url = f"https://stac-api.pods.{domain}"
+    # NOTE: Tapis pod_id must be lowercase alphanumeric (no hyphens), so the pod
+    # is `stacapi` even though the GHCR image is `stac-api`.
+    api_url = f"https://stacapi.pods.{domain}"
 
     api_env = {k: os.environ[k] for k in API_ENV_KEYS if os.environ.get(k)}
     api_env.setdefault("STAC_CORS_ORIGINS", api_url)
 
     api = {
-        "pod_id": "stac-api",
+        "pod_id": "stacapi",
         "image": f"ghcr.io/{owner}/stac-api:{tag}",
-        "description": "stac-fastapi-pgstac — STAC API beside CKAN",
+        "description": "stac fastapi pgstac STAC API beside CKAN",
         "networking": {"default": {"protocol": "http", "port": 8081}},
         "resources": {"cpu_request": 250, "cpu_limit": 1000,
                       "mem_request": 512, "mem_limit": 2048},
@@ -149,10 +151,11 @@ def main(argv=None) -> int:
     t.get_tokens()
 
     for key in selected:
+        print(key, specs[key])
         upsert_pod(t, specs[key], recreate=args.recreate, start=not args.no_start)
 
     print("\nDone. Once started:")
-    print(f"  API:      {urls['api']}   (health: {urls['api']}/healthz)")
+    print(f"  API:      {urls['api']}   (health: {urls['api']}/healthz, viewer: {urls['api']}/)")
     print( "  Postgres: stacpostgres.pods.<domain>:443  (then run `python -m pgstac.migrate`)")
     return 0
 

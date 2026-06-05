@@ -21,10 +21,21 @@ SUBSIDE manifest shape (the fields we read)::
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+@dataclass
+class CogSpec:
+    """One COG asset to publish: which file, its STAC asset key, and value range."""
+
+    filename: str                       # basename in the job's output dir
+    key: str = "cog"                    # STAC asset key (cog / cumulative / velocity)
+    title: str | None = None
+    display_range: dict[str, float] | None = None   # {"vmin","vmax"} for tiler rescale
 
 
 @dataclass
@@ -111,3 +122,71 @@ def load_granule(manifest_path: str | Path, item_id: str) -> Granule:
     """Read a SUBSIDE manifest JSON file and normalize it."""
     data = json.loads(Path(manifest_path).read_text())
     return granule_from_subside_manifest(data, item_id)
+
+
+def _range(pair) -> dict[str, float] | None:
+    """[lo, hi] -> {'vmin','vmax'}, or None."""
+    if isinstance(pair, (list, tuple)) and len(pair) == 2:
+        return {"vmin": float(pair[0]), "vmax": float(pair[1])}
+    return None
+
+
+def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec], str | None]:
+    """Normalize either SUBSIDE manifest shape into (Granule, COGs, overlay filename).
+
+    Auto-detects:
+      * **H2I** (``run-manifest.json``): top-level ``bbox``; one COG
+        (``artifacts.cog_tif``, default ``disp_displacement.tif``) with
+        ``artifacts.display_range``; an overlay PNG (``artifacts.overlay_png``);
+        NetCDF ``product_urls`` -> source link assets.
+      * **WERC** (``werc-run-manifest.json``): bbox from the GeoTIFF ``bounds``;
+        two COGs — cumulative (``clip_range_mm``) and velocity
+        (``p02_p98_mm_per_year``); no overlay.
+    """
+    artifacts = manifest.get("artifacts") or {}
+    config = manifest.get("config") or {}
+    start = _rfc3339_from_date(config.get("start_date"))
+    end = _rfc3339_from_date(config.get("end_date"))
+    source_urls = list(manifest.get("product_urls") or [])
+    props: dict[str, Any] = {}
+
+    is_werc = ("cumulative_displacement_geotiff" in artifacts) or ("velocity_geotiff" in artifacts)
+    if is_werc:
+        cum = artifacts.get("cumulative_displacement_geotiff") or {}
+        vel = artifacts.get("velocity_geotiff") or {}
+        bounds = cum.get("bounds") or vel.get("bounds")
+        if not bounds:
+            raise ValueError("WERC manifest has no GeoTIFF bounds; cannot build geometry")
+        bbox = [float(x) for x in bounds]
+        cogs: list[CogSpec] = []
+        if cum.get("path"):
+            cogs.append(CogSpec(os.path.basename(cum["path"]), key="cumulative",
+                                title="Cumulative displacement (mm)",
+                                display_range=_range(cum.get("clip_range_mm"))))
+        if vel.get("path"):
+            cogs.append(CogSpec(os.path.basename(vel["path"]), key="velocity",
+                                title="Velocity (mm/yr)",
+                                display_range=_range(vel.get("p02_p98_mm_per_year"))))
+        overlay = None
+        if manifest.get("frame_id") is not None:
+            props["subside:frame_id"] = manifest["frame_id"]
+    else:
+        bbox = _bbox_list(manifest.get("bbox"))
+        cog_tif = artifacts.get("cog_tif")
+        cogs = [CogSpec(os.path.basename(cog_tif) if cog_tif else "disp_displacement.tif",
+                        key="cog", title="Displacement (COG)",
+                        display_range=artifacts.get("display_range"))]
+        ov = artifacts.get("overlay_png")
+        overlay = os.path.basename(ov) if ov else "disp_overlay.png"
+        if manifest.get("frame_ids"):
+            props["subside:frame_ids"] = manifest["frame_ids"]
+        if manifest.get("product_count") is not None:
+            props["subside:product_count"] = manifest["product_count"]
+
+    granule = Granule(
+        item_id=item_id, bbox=bbox,
+        datetime=None if (start and end) else (start or end),
+        start_datetime=start, end_datetime=end,
+        source_urls=source_urls, properties=props,
+    )
+    return granule, cogs, overlay

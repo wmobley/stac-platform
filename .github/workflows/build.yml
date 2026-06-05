@@ -12,6 +12,7 @@ on:
       - "stac_api/**"
       - "bridge/**"
       - "pgstac/**"
+      - "webui/**"
       - "requirements-*.txt"
       - "pyproject.toml"
       - "deploy/**"

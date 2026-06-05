@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stacmap import assets as A
 from stacmap import stac
-from stacmap.manifest import granule_from_subside_manifest
+from stacmap.manifest import granule_from_subside_manifest, parse_manifest
 
 # A trimmed real SUBSIDE run manifest (see subside h2i_lab walkthrough_outputs).
 MANIFEST = {
@@ -25,6 +25,48 @@ MANIFEST = {
     ],
     "artifacts": {"display_range": {"vmin": -0.0095, "vmax": 0.0649}},
 }
+
+
+# A trimmed real WERC run manifest (see subside werc walkthrough_outputs): no
+# top-level bbox, two GeoTIFFs with their own ranges, manifest name werc-run-*.
+WERC_MANIFEST = {
+    "config": {"start_date": "2024-06-01", "end_date": "2024-09-01"},
+    "frame_id": 8882,
+    "artifacts": {
+        "cumulative_displacement_geotiff": {
+            "path": "/x/opera_disp_s1_cumulative.tif",
+            "bounds": [-95.5551, 29.5500, -95.3455, 29.7500],
+            "clip_range_mm": [-19.67, 21.66], "crs": "EPSG:4326",
+        },
+        "velocity_geotiff": {
+            "path": "/x/opera_disp_s1_velocity.tif",
+            "bounds": [-95.5551, 29.5500, -95.3455, 29.7500],
+            "p02_p98_mm_per_year": [-553.1, 594.1], "crs": "EPSG:4326",
+        },
+    },
+}
+
+
+def test_parse_h2i():
+    g, cogs, overlay = parse_manifest(MANIFEST, "job-123")
+    assert [c.key for c in cogs] == ["cog"]
+    assert cogs[0].filename == "disp_displacement.tif"
+    assert cogs[0].display_range == {"vmin": -0.0095, "vmax": 0.0649}
+    assert overlay == "disp_overlay.png"
+    assert g.bbox == [-95.55, 29.55, -95.35, 29.75]
+
+
+def test_parse_werc():
+    g, cogs, overlay = parse_manifest(WERC_MANIFEST, "werc-1")
+    assert [c.key for c in cogs] == ["cumulative", "velocity"]
+    assert cogs[0].filename == "opera_disp_s1_cumulative.tif"
+    assert cogs[0].display_range == {"vmin": -19.67, "vmax": 21.66}
+    assert cogs[1].filename == "opera_disp_s1_velocity.tif"
+    assert cogs[1].display_range == {"vmin": -553.1, "vmax": 594.1}
+    assert overlay is None                          # WERC has no overlay
+    assert g.bbox == [-95.5551, 29.55, -95.3455, 29.75]   # from GeoTIFF bounds
+    assert g.start_datetime == "2024-06-01T00:00:00Z"
+    assert g.properties["subside:frame_id"] == 8882
 
 
 def test_granule_from_manifest():

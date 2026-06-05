@@ -1,5 +1,15 @@
-# STAC API image (stac-fastapi-pgstac) for the stac-api Tapis pod.
+# STAC API image (stac-fastapi-pgstac) + the React viewer, for the stac-api pod.
 # Build context is the repo root: `docker build -f deploy/Dockerfile.api .`
+
+# --- stage 1: build the React viewer -> /webui/dist -------------------------
+FROM node:20-alpine AS webui
+WORKDIR /webui
+COPY webui/package.json webui/package-lock.json* ./
+RUN npm install
+COPY webui/ ./
+RUN npm run build
+
+# --- stage 2: the python API, serving the built viewer at / -----------------
 FROM python:3.11-slim
 
 RUN apt-get update \
@@ -14,9 +24,11 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 COPY stacmap /app/stacmap
 COPY stac_api /app/stac_api
 COPY pgstac /app/pgstac
+# The built SPA (stac_api mounts STAC_WEBUI_DIR=/app/webui at "/").
+COPY --from=webui /webui/dist /app/webui
 
-ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 STAC_WEBUI_DIR=/app/webui
 EXPOSE 8081
 
-# Config (PG*, STAC_*, CORS) comes from the pod environment. No .env baked in.
+# Config (PG*, STAC_*, TAPIS_BASE_URL, PREFIX_PATH) comes from the pod env.
 CMD ["uvicorn", "stac_api.app:app", "--host", "0.0.0.0", "--port", "8081"]
