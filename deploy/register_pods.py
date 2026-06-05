@@ -31,7 +31,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 API_ENV_KEYS = [
     "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
     "PGSSLMODE", "PGSSLNEGOTIATION",
-    "STAC_API_TITLE", "STAC_API_DESCRIPTION", "PREFIX_PATH",
+    "STAC_API_TITLE", "STAC_API_DESCRIPTION", "STAC_DOCS_URL", "STAC_OPENAPI_URL",
+    "PREFIX_PATH",
     "STAC_CORS_ORIGINS", "TAPIS_BASE_URL",
 ]
 SECRET_KEYS = {"PGPASSWORD"}
@@ -57,6 +58,8 @@ def build_specs(owner: str, tag: str, base_url: str) -> dict[str, dict]:
 
     api_env = {k: os.environ[k] for k in API_ENV_KEYS if os.environ.get(k)}
     api_env.setdefault("STAC_CORS_ORIGINS", api_url)
+    api_prefix = api_env.get("PREFIX_PATH", "/api/v1").rstrip("/") or ""
+    docs_path = api_env.get("STAC_DOCS_URL", f"{api_prefix}/docs" if api_prefix else "/docs")
 
     api = {
         "pod_id": "stacapi",
@@ -75,7 +78,11 @@ def build_specs(owner: str, tag: str, base_url: str) -> dict[str, dict]:
         "description": "PgSTAC Postgres database pod",
         "time_to_stop_default": -1,
     }
-    return {"api": api, "postgres": postgres, "_urls": {"api": api_url}}
+    return {
+        "api": api,
+        "postgres": postgres,
+        "_urls": {"api": api_url, "docs": f"{api_url}{docs_path}"},
+    }
 
 
 def upsert_pod(t, spec: dict, *, recreate: bool, start: bool) -> None:
@@ -156,6 +163,7 @@ def main(argv=None) -> int:
 
     print("\nDone. Once started:")
     print(f"  API:      {urls['api']}   (health: {urls['api']}/healthz, viewer: {urls['api']}/)")
+    print(f"  Docs:     {urls['docs']}")
     print( "  Postgres: stacpostgres.pods.<domain>:443  (then run `python -m pgstac.migrate`)")
     return 0
 

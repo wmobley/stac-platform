@@ -55,6 +55,7 @@ python -m pgstac.migrate                      # runs pypgstac migrate against PG
 
 # 2. run the STAC API
 uvicorn stac_api.app:app --reload --port 8081
+# docs: http://localhost:8081/api/v1/docs
 
 # 3. dual-write a granule (CKAN + STAC) from a SUBSIDE manifest
 python -m stacmap.publish \
@@ -90,9 +91,10 @@ with the publish env set.)
 **Full stack (API + React viewer), end-to-end with Docker** (recommended):
 
 The image is multi-stage (builds the `webui/` React app, then serves it from the
-API). The viewer is at `/`; the STAC API is under **`/api/v1`**. Compose sets
-`STAC_AUTH_DISABLED=true`, so writes are open locally (in prod, writes need a
-valid Tapis token).
+API). The viewer is at `/`; the STAC API is under **`/api/v1`**. Swagger docs are
+at **`/api/v1/docs`** and the OpenAPI schema is at **`/api/v1/openapi.json`**.
+Compose sets `STAC_AUTH_DISABLED=true`, so writes are open locally (in prod,
+writes need a valid Tapis token).
 
 ```bash
 docker compose up -d        # db -> migrate (one-shot) -> stac-api on :8081
@@ -100,6 +102,7 @@ docker compose up -d        # db -> migrate (one-shot) -> stac-api on :8081
                             # so a fresh DB (after `down -v`) just works.
 
 open http://localhost:8081/                  # the React viewer
+open http://localhost:8081/api/v1/docs       # Swagger UI
 curl -s localhost:8081/healthz
 curl -s localhost:8081/api/v1/collections    | python -m json.tool
 
@@ -124,8 +127,10 @@ curl -s -X POST localhost:8081/api/v1/search \
 ```
 
 In production (auth on), writes require `Authorization: Bearer <Tapis token>` —
-any valid Tapis user. Develop the UI with hot-reload via `cd webui && npm run dev`
-(vite on :5173, proxying `/api/v1` → :8081).
+any valid Tapis user. In Swagger, click **Authorize** and paste the Tapis access
+token before trying collection/item write endpoints. Develop the UI with
+hot-reload via `cd webui && npm run dev` (vite on :5173, proxying `/api/v1` →
+:8081).
 
 `docker compose down -v` tears it down (the `-v` drops the database volume).
 

@@ -31,4 +31,5 @@ ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 STAC_WEBUI_DIR=/app/webui
 EXPOSE 8081
 
 # Config (PG*, STAC_*, TAPIS_BASE_URL, PREFIX_PATH) comes from the pod env.
+# Swagger UI defaults to /api/v1/docs; OpenAPI defaults to /api/v1/openapi.json.
 CMD ["uvicorn", "stac_api.app:app", "--host", "0.0.0.0", "--port", "8081"]

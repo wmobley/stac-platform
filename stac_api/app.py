@@ -32,6 +32,138 @@ from stac_fastapi.pgstac.app import app  # noqa: E402  (after env mapping + patc
 _WRITE_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 # Write (Transactions) routes live under <prefix>/collections.
 _WRITE_PREFIX = f"{cfg.API_PREFIX.rstrip('/')}/collections"
+_AUTH_SCHEME = "TapisBearerAuth"
+_SEARCH_EXAMPLE = {
+    "collections": ["demo"],
+    "bbox": [-96, 29, -95, 30],
+    "limit": 10,
+}
+_COLLECTION_EXAMPLE = {
+    "type": "Collection",
+    "stac_version": "1.0.0",
+    "id": "demo",
+    "description": "Demo collection",
+    "license": "proprietary",
+    "extent": {
+        "spatial": {"bbox": [[-180, -90, 180, 90]]},
+        "temporal": {"interval": [[None, None]]},
+    },
+    "links": [],
+}
+_ITEM_EXAMPLE = {
+    "type": "Feature",
+    "stac_version": "1.0.0",
+    "id": "item-1",
+    "collection": "demo",
+    "geometry": {"type": "Point", "coordinates": [-95.4, 29.6]},
+    "bbox": [-95.4, 29.6, -95.4, 29.6],
+    "properties": {"datetime": "2024-06-01T00:00:00Z"},
+    "assets": {},
+    "links": [],
+}
+
+
+def _add_description(operation: dict, note: str) -> None:
+    description = operation.get("description") or ""
+    if note not in description:
+        operation["description"] = f"{description.rstrip()}\n\n{note}".strip()
+
+
+def _add_json_example(operation: dict, name: str, summary: str, value: dict) -> None:
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        return
+    content = request_body.setdefault("content", {})
+    media = content.get("application/json") or content.get("application/geo+json")
+    if media is None:
+        media = content.setdefault("application/json", {})
+    examples = media.setdefault("examples", {})
+    examples.setdefault(name, {"summary": summary, "value": value})
+
+
+def _install_openapi_auth_metadata() -> None:
+    """Advertise the production write-auth requirement in Swagger/OpenAPI."""
+    original_openapi = app.openapi
+
+    def custom_openapi() -> dict:
+        schema = original_openapi()
+        components = schema.setdefault("components", {})
+        schemes = components.setdefault("securitySchemes", {})
+        schemes.setdefault(
+            _AUTH_SCHEME,
+            {
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "Tapis access token",
+                "description": (
+                    "Required for STAC Transactions writes in production. "
+                    "Use any valid Tapis access token for this tenant."
+                ),
+            },
+        )
+
+        auth_note = (
+            "Production write calls require `Authorization: Bearer <Tapis access token>`. "
+            "Local Docker compose may disable this with `STAC_AUTH_DISABLED=true`."
+        )
+        search_note = (
+            "Use search for discovery across collections. Start with a collection id, bbox, "
+            "datetime, and limit, then inspect returned item assets for CKAN download URLs."
+        )
+        collection_note = (
+            "Create or replace a STAC Collection. In this platform, one CKAN dataset maps "
+            "to one STAC Collection."
+        )
+        item_note = (
+            "Create or replace a STAC Item inside a collection. Assets should point at the "
+            "published CKAN resource URLs for the job output files."
+        )
+        auth_requirement = {_AUTH_SCHEME: []}
+        for path, operations in schema.get("paths", {}).items():
+            for method, operation in operations.items():
+                method_upper = method.upper()
+                if not isinstance(operation, dict):
+                    continue
+                if path.endswith("/search") and method_upper == "POST":
+                    _add_description(operation, search_note)
+                    _add_json_example(
+                        operation,
+                        "bbox-search",
+                        "Search a collection by bounding box",
+                        _SEARCH_EXAMPLE,
+                    )
+                if path == _WRITE_PREFIX and method_upper == "POST":
+                    _add_description(operation, collection_note)
+                    _add_json_example(
+                        operation,
+                        "create-collection",
+                        "Create a collection",
+                        _COLLECTION_EXAMPLE,
+                    )
+                if path.startswith(_WRITE_PREFIX) and path.endswith("/items") \
+                        and method_upper == "POST":
+                    _add_description(operation, item_note)
+                    _add_json_example(
+                        operation,
+                        "create-item",
+                        "Create an item with CKAN-backed assets",
+                        _ITEM_EXAMPLE,
+                    )
+                if path.startswith(_WRITE_PREFIX) and method_upper in _WRITE_METHODS:
+                    security = operation.setdefault("security", [])
+                    if auth_requirement not in security:
+                        security.insert(0, auth_requirement)
+                    _add_description(operation, auth_note)
+                    operation.setdefault("responses", {}).setdefault(
+                        "401",
+                        {"description": "Missing or invalid Tapis bearer token"},
+                    )
+        return schema
+
+    app.openapi = custom_openapi
+
+
+_install_openapi_auth_metadata()
 
 
 @app.middleware("http")
