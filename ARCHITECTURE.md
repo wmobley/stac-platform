@@ -57,7 +57,7 @@ two write paths can never disagree on shape.
 | `manifest.py` | Parse a SUBSIDE manifest into a generic `Granule` (item id, bbox, datetimes, source URLs, display range). The only SUBSIDE-specific code. |
 | `assets.py` | Map a (name, href, format) to a STAC Asset dict with the right role + media type. |
 | `stac.py` | Pure builders: `bbox_to_geometry`, `build_item`, `build_collection`. No I/O. |
-| `ckan.py` | `ckanapi` wrapper: `ensure_dataset`, `upload_resource`, `link_resource`, `iter_items` (resources grouped by `stac_item_id`). |
+| `ckan.py` | CKAN Action API client: `ensure_dataset`, `upload_resource`, `link_resource`, `iter_items` (resources grouped by `stac_item_id`). |
 | `stac_client.py` | STAC Transactions HTTP client: `ensure_collection`, `upsert_item`. |
 
 To onboard a new project: add (or reuse) a manifest parser that yields a `Granule`,

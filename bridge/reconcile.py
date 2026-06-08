@@ -60,7 +60,8 @@ def _build_assets(granule: Granule, resources: list[dict]) -> dict[str, dict]:
         if not href:
             continue
         key, asset = A.asset_for_resource(
-            name, href, display_range=granule.display_range
+            name, href, display_range=granule.display_range,
+            byte_size=res.get("size"), checksum=res.get("hash"),
         )
         # Avoid clobbering when several resources share a key (e.g. many .nc links).
         if key in out:

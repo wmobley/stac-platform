@@ -6,6 +6,6 @@ Collections/Items through these modules so they can never disagree on shape:
     manifest.py     SUBSIDE manifest  -> generic Granule          (only project-specific bit)
     assets.py       (name, href, fmt) -> STAC Asset dict
     stac.py         Granule + assets  -> STAC Item / Collection    (pure, no I/O)
-    ckan.py         ckanapi wrapper    (ensure_dataset / upload / link / iter_items)
+    ckan.py         CKAN Action API client (ensure_dataset / upload / link / iter_items)
     stac_client.py  STAC Transactions HTTP client (ensure_collection / upsert_item)
 """

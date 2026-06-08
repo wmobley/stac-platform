@@ -50,17 +50,20 @@ def publish_item(
             res["url"], title=spec.title or spec.filename,
             media_type=A.COG_MEDIA_TYPE, roles=["data", "visual"],
             display_range=spec.display_range,
+            byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if overlay_path:
         res = ckan.upload_resource(collection_id, str(overlay_path), item_id=item_id)
         item_assets["overlay"] = A.make_asset(
             res["url"], title=os.path.basename(str(overlay_path)),
             media_type=A.PNG_MEDIA_TYPE, roles=["overlay", "visual"],
+            byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if manifest_path:
         res = ckan.upload_resource(collection_id, str(manifest_path), item_id=item_id)
         item_assets["metadata"] = A.make_asset(
             res["url"], title="manifest", media_type=A.JSON_MEDIA_TYPE, roles=["metadata"],
+            byte_size=res.get("size"), checksum=res.get("hash"),
         )
     # Source NetCDFs: link-only resources -> `source` link assets (back-populatable).
     for i, url in enumerate(granule.source_urls):
@@ -69,6 +72,7 @@ def publish_item(
         item_assets[key] = A.make_asset(
             res.get("url", url), title=os.path.basename(url),
             media_type=A.NETCDF_MEDIA_TYPE, roles=["data", "source"],
+            byte_size=res.get("size"), checksum=res.get("hash"),
         )
 
     item = stac.build_item(granule, collection_id, item_assets)

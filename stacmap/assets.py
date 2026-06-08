@@ -15,9 +15,36 @@ PNG_MEDIA_TYPE = "image/png"
 JSON_MEDIA_TYPE = "application/json"
 NETCDF_MEDIA_TYPE = "application/x-netcdf"
 
+# Multihash prefixes (varint code + varint length, hex) keyed by hex-digest length.
+# CKAN stores a bare hex digest with no algorithm tag, so we infer the algorithm
+# from the digest length: 32=md5, 40=sha1, 64=sha2-256. Anything else -> skip.
+_MULTIHASH_PREFIX = {32: "d50110", 40: "1114", 64: "1220"}
+
 
 def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def _multihash(hexdigest: str | None) -> str | None:
+    """Encode a bare hex digest (md5/sha1/sha2-256) as a STAC `file:checksum`.
+
+    `file:checksum` is a Multihash in hex. CKAN gives us only the bare digest, so
+    we recognize the algorithm by length and prepend its multihash prefix.
+    """
+    h = (hexdigest or "").strip().lower()
+    if not h or any(c not in "0123456789abcdef" for c in h):
+        return None
+    prefix = _MULTIHASH_PREFIX.get(len(h))
+    return prefix + h if prefix else None
+
+
+def _byte_size(value: object) -> int | None:
+    """CKAN `size` is sometimes a string; coerce to a positive int, else None."""
+    try:
+        n = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
 
 
 def classify(name: str) -> tuple[str, list[str], str]:
@@ -45,11 +72,15 @@ def make_asset(
     media_type: str | None = None,
     roles: list[str] | None = None,
     display_range: dict[str, float] | None = None,
+    byte_size: object | None = None,
+    checksum: str | None = None,
 ) -> dict[str, Any]:
     """Build a single STAC Asset dict.
 
     If ``display_range`` (``{"vmin","vmax"}``) is given it is attached as
-    ``raster:bands`` statistics so a tiler can auto-rescale the COG.
+    ``raster:bands`` statistics so a tiler can auto-rescale the COG. ``byte_size``
+    and ``checksum`` (a bare hex digest, e.g. from CKAN) populate the File
+    extension's ``file:size`` / ``file:checksum`` when present.
     """
     asset: dict[str, Any] = {"href": href}
     if media_type:
@@ -67,6 +98,12 @@ def make_asset(
                 }
             }
         ]
+    size = _byte_size(byte_size)
+    if size is not None:
+        asset["file:size"] = size
+    mh = _multihash(checksum)
+    if mh is not None:
+        asset["file:checksum"] = mh
     return asset
 
 
@@ -76,10 +113,13 @@ def asset_for_resource(
     *,
     title: str | None = None,
     display_range: dict[str, float] | None = None,
+    byte_size: object | None = None,
+    checksum: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (asset_key, asset_dict) for a resource by inferring its type."""
     key, roles, media_type = classify(name)
     dr = display_range if key == "cog" else None
     return key, make_asset(
-        href, title=title or name, media_type=media_type, roles=roles, display_range=dr
+        href, title=title or name, media_type=media_type, roles=roles,
+        display_range=dr, byte_size=byte_size, checksum=checksum,
     )

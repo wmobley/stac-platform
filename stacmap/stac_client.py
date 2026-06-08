@@ -18,15 +18,28 @@ import httpx
 
 
 class StacClient:
-    def __init__(self, url: str | None = None, token: str | None = None, *, timeout: float = 60.0):
+    def __init__(
+        self,
+        url: str | None = None,
+        token: str | None = None,
+        *,
+        timeout: float = 60.0,
+        transport: httpx.BaseTransport | None = None,
+    ):
         self.url = (url or os.environ.get("STAC_URL", "")).rstrip("/")
         self.token = token or os.environ.get("STAC_TOKEN")
         if not self.url:
             raise RuntimeError("STAC_URL is not set")
         headers = {"Content-Type": "application/json"}
         if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
-        self._client = httpx.Client(base_url=self.url, headers=headers, timeout=timeout)
+            token = self.token.strip()
+            headers["Authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+        self._client = httpx.Client(
+            base_url=self.url,
+            headers=headers,
+            timeout=timeout,
+            transport=transport,
+        )
 
     def close(self) -> None:
         self._client.close()

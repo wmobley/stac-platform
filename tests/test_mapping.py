@@ -97,6 +97,43 @@ def test_asset_classification():
     assert key == "metadata"
 
 
+def test_file_extension_fields():
+    # size + a bare md5 digest -> file:size (int) + file:checksum (md5 multihash).
+    _, cog = A.asset_for_resource(
+        "d.tif", "https://ckan/d.tif",
+        byte_size="123456", checksum="d41d8cd98f00b204e9800998ecf8427e",
+    )
+    assert cog["file:size"] == 123456
+    assert cog["file:checksum"] == "d50110d41d8cd98f00b204e9800998ecf8427e"
+
+    # sha2-256 (64 hex) -> 1220 prefix; junk / missing -> no file:checksum.
+    assert A._multihash("a" * 64).startswith("1220")
+    _, link = A.asset_for_resource("p.nc", "https://x/p.nc", byte_size=None, checksum="nope")
+    assert "file:size" not in link and "file:checksum" not in link
+
+
+def test_render_recipe_and_dynamic_extensions():
+    g = granule_from_subside_manifest(MANIFEST, "job-123")
+    _, cog = A.asset_for_resource(
+        "d.tif", "https://ckan/d.tif", display_range=g.display_range, byte_size=42,
+    )
+    item = stac.build_item(g, "subsidence-rates", {"cog": cog})
+
+    # Render recipe derived from the COG's raster:bands statistics.
+    render = item["properties"]["renders"]["cog"]
+    assert render["assets"] == ["cog"]
+    assert render["rescale"] == [[-0.0095, 0.0649]]
+    assert render["colormap_name"] == stac.RENDER_COLORMAP
+
+    # Declared extensions == exactly those whose fields are present (raster/file/render).
+    assert item["stac_extensions"] == [stac.RASTER_EXT, stac.FILE_EXT, stac.RENDER_EXT]
+
+    # An Item with no extension fields declares nothing and has no renders.
+    plain = stac.build_item(g, "c", {"meta": A.make_asset("https://x/m.json")})
+    assert plain["stac_extensions"] == []
+    assert "renders" not in plain["properties"]
+
+
 def test_build_item_and_collection():
     g = granule_from_subside_manifest(MANIFEST, "job-123")
     _, cog = A.asset_for_resource("d.tif", "https://ckan/d.tif", display_range=g.display_range)

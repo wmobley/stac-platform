@@ -12,10 +12,59 @@ from .manifest import Granule
 
 STAC_VERSION = "1.0.0"
 
-# Extensions whose fields we emit (raster stats on the COG asset).
-ITEM_EXTENSIONS = [
-    "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
-]
+# Extension schema URIs. We declare one only when the corresponding fields are
+# actually present on an asset — an extension URI without populated fields proves
+# nothing, so the `stac_extensions` list is computed per-item, not hardcoded.
+RASTER_EXT = "https://stac-extensions.github.io/raster/v1.1.0/schema.json"
+FILE_EXT = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+RENDER_EXT = "https://stac-extensions.github.io/render/v1.0.0/schema.json"
+
+# Default tiler recipe for the displacement COGs: a zero-centered diverging ramp,
+# rescaled to each band's own statistics.
+RENDER_COLORMAP = "rdbu_r"
+RENDER_RESAMPLING = "bilinear"
+
+
+def _render_for_asset(key: str, asset: dict[str, Any]) -> dict[str, Any] | None:
+    """A Render recipe for a COG asset that carries raster:bands statistics."""
+    bands = asset.get("raster:bands")
+    if not bands:
+        return None
+    stats = bands[0].get("statistics") or {}
+    lo, hi = stats.get("minimum"), stats.get("maximum")
+    if lo is None or hi is None:
+        return None
+    return {
+        "title": asset.get("title") or key,
+        "assets": [key],
+        "rescale": [[lo, hi]],
+        "colormap_name": RENDER_COLORMAP,
+        "resampling": RENDER_RESAMPLING,
+    }
+
+
+def _renders(assets: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Build the Item-level `renders` map from every COG asset with statistics."""
+    out: dict[str, dict[str, Any]] = {}
+    for key, asset in assets.items():
+        recipe = _render_for_asset(key, asset)
+        if recipe is not None:
+            out[key] = recipe
+    return out
+
+
+def _item_extensions(
+    assets: dict[str, dict[str, Any]], has_renders: bool
+) -> list[str]:
+    """Declare only the extensions whose fields actually appear on this Item."""
+    exts: list[str] = []
+    if any("raster:bands" in a for a in assets.values()):
+        exts.append(RASTER_EXT)
+    if any(("file:size" in a or "file:checksum" in a) for a in assets.values()):
+        exts.append(FILE_EXT)
+    if has_renders:
+        exts.append(RENDER_EXT)
+    return exts
 
 
 def bbox_to_geometry(bbox: list[float]) -> dict[str, Any]:
@@ -47,10 +96,14 @@ def build_item(
     properties = dict(granule.properties)
     properties.update(_temporal_props(granule))
 
+    renders = _renders(assets)
+    if renders:
+        properties["renders"] = renders
+
     return {
         "type": "Feature",
         "stac_version": STAC_VERSION,
-        "stac_extensions": list(ITEM_EXTENSIONS),
+        "stac_extensions": _item_extensions(assets, bool(renders)),
         "id": granule.item_id,
         "collection": collection_id,
         "geometry": bbox_to_geometry(granule.bbox),
