@@ -41,11 +41,17 @@ def publish_item(
     """Upload the given local files to CKAN, then build + upsert the STAC Item."""
     ckan = ckan or CkanClient()
     item_id = granule.item_id
-    ckan.ensure_dataset(collection_id, title=collection_title, notes=collection_description)
+    # One CKAN dataset per run (= one STAC Item), tagged with this collection so
+    # the bridge can regroup runs into the (unchanged) STAC Collection.
+    run_title = f"{collection_title or collection_id} — {item_id}"
+    dataset = ckan.ensure_run_dataset(
+        collection_id, item_id, title=run_title, notes=collection_description,
+    )
+    dataset_name = dataset["name"]
 
     item_assets: dict[str, dict] = {}
     for local_path, spec in cog_files:
-        res = ckan.upload_resource(collection_id, str(local_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(local_path), item_id=item_id)
         item_assets[spec.key] = A.make_asset(
             res["url"], title=spec.title or spec.filename,
             media_type=A.COG_MEDIA_TYPE, roles=["data", "visual"],
@@ -53,21 +59,21 @@ def publish_item(
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if overlay_path:
-        res = ckan.upload_resource(collection_id, str(overlay_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(overlay_path), item_id=item_id)
         item_assets["overlay"] = A.make_asset(
             res["url"], title=os.path.basename(str(overlay_path)),
             media_type=A.PNG_MEDIA_TYPE, roles=["overlay", "visual"],
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if manifest_path:
-        res = ckan.upload_resource(collection_id, str(manifest_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(manifest_path), item_id=item_id)
         item_assets["metadata"] = A.make_asset(
             res["url"], title="manifest", media_type=A.JSON_MEDIA_TYPE, roles=["metadata"],
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     # Source NetCDFs: link-only resources -> `source` link assets (back-populatable).
     for i, url in enumerate(granule.source_urls):
-        res = ckan.link_resource(collection_id, url, item_id=item_id)
+        res = ckan.link_resource(dataset_name, url, item_id=item_id)
         key = "source" if i == 0 else f"source_{i:04d}"
         item_assets[key] = A.make_asset(
             res.get("url", url), title=os.path.basename(url),

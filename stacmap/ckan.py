@@ -1,27 +1,64 @@
 """Thin CKAN Action API client for the CKAN side of the platform.
 
-CKAN is the asset store + human catalog. A CKAN *dataset* (package) is one STAC
-Collection; its *resources* are grouped into STAC Items by a ``stac_item_id``
-custom field. This module knows just enough CKAN to:
+CKAN is the asset store + human catalog. To keep the human catalog browsable, a
+CKAN *dataset* (package) is **one run** = one STAC Item: it holds just that run's
+handful of resources (COG/overlay/manifest/source). The STAC Collection is *not*
+a CKAN dataset — it is a logical grouping that spans many per-run datasets, joined
+by a ``stac_collection`` package extra. (Previously every run dumped its resources
+into one shared dataset, which made the CKAN dataset page an unbrowsable wall.)
 
-  * ensure a dataset exists (the Collection),
+This module knows just enough CKAN to:
+
+  * ensure a per-run dataset exists, tagged with ``stac_collection`` + ``stac_item_id``,
   * upload a file resource (COG/PNG/manifest) tagged with ``stac_item_id``,
   * register a *link* resource (the source NetCDF, not uploaded),
-  * iterate a dataset's resources grouped by ``stac_item_id`` (for the bridge).
+  * find every per-run dataset in a collection and yield its (item_id, resources)
+    for the bridge.
 
-Resource custom fields: CKAN stores unknown keys passed to ``resource_create`` as
-first-class resource attributes, so ``stac_item_id`` round-trips on read.
+Custom fields: CKAN stores unknown keys passed to ``resource_create`` as
+first-class resource attributes (so ``stac_item_id`` round-trips on a resource),
+and package-level ``extras`` round-trip on the dataset (``stac_collection`` /
+``stac_item_id``) and are searchable via ``fq``.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from collections import OrderedDict
 from typing import Any, Iterator
 
 import httpx
 
 ITEM_ID_FIELD = "stac_item_id"
+COLLECTION_FIELD = "stac_collection"
+
+# CKAN dataset names: lowercase, 2-100 chars, only [a-z0-9_-].
+_NAME_MAX = 100
+
+
+def dataset_name(collection_id: str, item_id: str) -> str:
+    """Deterministic per-run CKAN dataset name: slug of ``{collection}--{item}``.
+
+    Stable for a given (collection, item) so re-publishing upserts the same
+    dataset. If the slug exceeds CKAN's 100-char limit it is truncated and a hash
+    of the full string appended to keep it unique.
+    """
+    raw = f"{collection_id}--{item_id}".lower()
+    slug = re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-")
+    if len(slug) > _NAME_MAX:
+        digest = hashlib.sha1(raw.encode()).hexdigest()[:8]
+        slug = f"{slug[: _NAME_MAX - 9].rstrip('-')}-{digest}"
+    return slug
+
+
+def _extra(pkg: dict, key: str) -> str | None:
+    """Read a package extra by key from a CKAN package dict."""
+    for entry in pkg.get("extras") or []:
+        if entry.get("key") == key:
+            return entry.get("value")
+    return None
 
 
 class CkanError(RuntimeError):
@@ -109,7 +146,7 @@ class CkanClient:
             raise CkanError(f"CKAN {action} failed HTTP {resp.status_code}: {payload}")
         return payload["result"]
 
-    # --- datasets (= Collections) --------------------------------------------
+    # --- datasets (= one run = one STAC Item) ---------------------------------
     def get_dataset(self, name: str) -> dict | None:
         resp = self._client.post("/api/3/action/package_show", json={"id": name})
         if resp.status_code == 404:
@@ -125,9 +162,16 @@ class CkanClient:
             raise CkanError(f"CKAN package_show failed HTTP {resp.status_code}: {payload}")
         return payload["result"]
 
-    def ensure_dataset(self, name: str, *, title: str | None = None,
-                       notes: str | None = None) -> dict:
-        """Return the dataset, creating it (private to ``self.org``) if absent."""
+    def ensure_run_dataset(self, collection_id: str, item_id: str, *,
+                           title: str | None = None,
+                           notes: str | None = None) -> dict:
+        """Return the per-run dataset, creating it (private to ``self.org``) if absent.
+
+        The dataset is named deterministically from ``(collection_id, item_id)`` and
+        carries ``stac_collection`` + ``stac_item_id`` extras so the bridge can find
+        every run in a collection and recover its STAC Item id.
+        """
+        name = dataset_name(collection_id, item_id)
         existing = self.get_dataset(name)
         if existing:
             return existing
@@ -135,9 +179,13 @@ class CkanClient:
             raise CkanError("CKAN_ORG must be set to create a dataset")
         return self._action_json("package_create", {
             "name": name,
-            "title": title or name,
+            "title": title or item_id,
             "notes": notes or "",
             "owner_org": self.org,
+            "extras": [
+                {"key": COLLECTION_FIELD, "value": collection_id},
+                {"key": ITEM_ID_FIELD, "value": item_id},
+            ],
         })
 
     # --- resources (= Assets) -------------------------------------------------
@@ -177,11 +225,51 @@ class CkanClient:
         return self._action_multipart("resource_create", {"package_id": dataset, **fields})
 
     # --- read side (for the bridge) ------------------------------------------
+    def find_collection_datasets(self, collection_id: str) -> Iterator[dict]:
+        """Yield every per-run dataset tagged with this ``stac_collection``.
+
+        Paginates ``package_search`` on the extra; results include resources.
+        """
+        start, rows = 0, 100
+        while True:
+            result = self._action_json("package_search", {
+                "fq": f'{COLLECTION_FIELD}:"{collection_id}"',
+                "rows": rows,
+                "start": start,
+                "include_private": True,
+            })
+            results = result.get("results", [])
+            for pkg in results:
+                yield pkg
+            start += len(results)
+            if not results or start >= result.get("count", 0):
+                return
+
+    def iter_collection_items(self, collection_id: str) -> Iterator[tuple[str, list[dict]]]:
+        """Yield (stac_item_id, [resources]) for every run in a collection.
+
+        Each per-run dataset is one STAC Item; its item id comes from the dataset's
+        ``stac_item_id`` extra (falling back to a resource's ``stac_item_id``).
+        Datasets with no resolvable item id or no resources are skipped.
+        """
+        for pkg in self.find_collection_datasets(collection_id):
+            resources = pkg.get("resources", [])
+            if not resources:
+                continue
+            item_id = _extra(pkg, ITEM_ID_FIELD)
+            if not item_id:
+                item_id = next((r.get(ITEM_ID_FIELD) for r in resources
+                                if r.get(ITEM_ID_FIELD)), None)
+            if not item_id:
+                continue
+            yield item_id, resources
+
     def iter_item_resources(self, dataset: str) -> Iterator[tuple[str, list[dict]]]:
-        """Yield (stac_item_id, [resources]) for a dataset, grouped by item id.
+        """Yield (stac_item_id, [resources]) for a single dataset, grouped by item id.
 
         Resources lacking a ``stac_item_id`` are skipped (they aren't STAC items).
-        Insertion order is preserved so output is deterministic.
+        Insertion order is preserved so output is deterministic. Retained for
+        single-dataset inspection; the bridge uses :meth:`iter_collection_items`.
         """
         pkg = self.get_dataset(dataset)
         if not pkg:

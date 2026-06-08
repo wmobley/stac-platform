@@ -42,8 +42,8 @@ class StubCkan:
         self.base = base
         self.uploaded: list[str] = []
 
-    def ensure_dataset(self, name, *, title=None, notes=None):
-        return {"name": name}
+    def ensure_run_dataset(self, collection_id, item_id, *, title=None, notes=None):
+        return {"name": f"{collection_id}--{item_id}"}
 
     def upload_resource(self, dataset, file_path, *, item_id, name=None, fmt=None):
         fn = name or os.path.basename(str(file_path))

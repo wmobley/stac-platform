@@ -1,14 +1,16 @@
-"""Reconcile a CKAN dataset into a PgSTAC Collection.
+"""Reconcile a collection's per-run CKAN datasets into a PgSTAC Collection.
 
-For one dataset (= Collection):
-  1. read its resources grouped by ``stac_item_id`` (CkanClient.iter_item_resources),
-  2. for each group, fetch the manifest resource to recover bbox/dates/source links,
-  3. build the STAC Item (assets = the group's resources, classified by name),
+A STAC Collection spans many per-run CKAN datasets joined by the ``stac_collection``
+extra (see ``stacmap.ckan``). For one collection:
+  1. find every per-run dataset tagged with it (CkanClient.iter_collection_items),
+     each yielding (stac_item_id, [resources]),
+  2. for each, fetch the manifest resource to recover bbox/dates/source links,
+  3. build the STAC Item (assets = that run's resources, classified by name),
   4. upsert Collection (extent recomputed from members) + every Item,
-  5. prune STAC Items whose CKAN ``stac_item_id`` group has vanished.
+  5. prune STAC Items whose CKAN per-run dataset has vanished.
 
 This is the backstop for the dual-write publish task: it makes CKAN the source of
-truth, backfills datasets that predate the task, and repairs any half-published
+truth, backfills runs that predate the task, and repairs any half-published
 granule (CKAN write succeeded, STAC write failed).
 """
 
@@ -70,7 +72,7 @@ def _build_assets(granule: Granule, resources: list[dict]) -> dict[str, dict]:
     return out
 
 
-def reconcile_dataset(
+def reconcile_collection(
     collection_id: str,
     *,
     ckan: CkanClient | None = None,
@@ -87,7 +89,7 @@ def reconcile_dataset(
         items: list[dict] = []
         skipped = 0
 
-        for item_id, resources in ckan.iter_item_resources(collection_id):
+        for item_id, resources in ckan.iter_collection_items(collection_id):
             manifest_res = _manifest_resource(resources)
             if not manifest_res:
                 skipped += 1  # no manifest -> can't place it in space/time
@@ -124,3 +126,8 @@ def reconcile_dataset(
     finally:
         if own_writer:
             writer.close()
+
+
+# Back-compat alias: the public entrypoint was ``reconcile_dataset`` when a
+# dataset == a Collection. It now reconciles a collection across per-run datasets.
+reconcile_dataset = reconcile_collection
