@@ -82,6 +82,11 @@ def _context_hints(spec: dict[str, Any], service: str) -> dict[str, Any]:
         "service": service,
         "group": spec.get("group"),
         "kind": spec.get("kind"),
+        # A UI behavior marker (e.g. "availability" → the OPERA frame layer gets
+        # viewport availability shading + click-to-pick-frame instead of a static
+        # style). Plain layers omit it.
+        "role": spec.get("role"),
+        "feature_count": spec.get("feature_count"),
         "color": spec.get("color"),
         "style": spec.get("style"),
         "opacity": spec.get("opacity"),

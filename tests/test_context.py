@@ -142,4 +142,11 @@ def test_shipped_seed_specs_build_cleanly():
     specs = json.loads(register_context.DEFAULT_SPECS.read_text())
     items = [C.build_context_item(layer, collection_id=specs["collection"]["id"])
              for layer in specs["layers"]]
-    assert {i["id"] for i in items} == {"major-aquifers", "minor-aquifers"}
+    assert {i["id"] for i in items} == {
+        "satellite", "texas_counties", "major-aquifers", "minor-aquifers",
+    }
+    # The OPERA frame layer carries the availability role + an MVT service link.
+    sat = next(i for i in items if i["id"] == "satellite")
+    assert sat["properties"]["subside:context"]["role"] == "availability"
+    assert sat["properties"]["subside:context"]["service"] == "mvt"
+    assert sat["links"][0]["type"] == "application/vnd.mapbox-vector-tile"

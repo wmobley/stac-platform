@@ -6,6 +6,33 @@
   },
   "layers": [
     {
+      "id": "satellite",
+      "title": "Satellite Availability",
+      "service": "mvt",
+      "href": "https://subsideapi.pods.portals.tapis.io/api/subside/tiles/satellite/{z}/{x}/{y}.mvt",
+      "group": "SUBSIDE",
+      "role": "availability",
+      "color": "#16a34a",
+      "default_visible": true,
+      "source_layers": ["satellite"],
+      "feature_count": 1226,
+      "style": {"geomType": "Polygon", "color": "#16a34a", "weight": 1, "fillColor": "#16a34a", "fillOpacity": 0.35},
+      "bbox": [-180.0, -15.289224, 180.0, 72.785503]
+    },
+    {
+      "id": "texas_counties",
+      "title": "Texas Counties",
+      "service": "mvt",
+      "href": "https://subsideapi.pods.portals.tapis.io/api/subside/tiles/texas_counties/{z}/{x}/{y}.mvt",
+      "group": "SUBSIDE",
+      "color": "#2563eb",
+      "default_visible": true,
+      "source_layers": ["texas_counties"],
+      "feature_count": 254,
+      "style": {"geomType": "Polygon", "color": "#2563eb", "weight": 1, "fillColor": "#2563eb", "fillOpacity": 0.15},
+      "bbox": [-106.646229793422, 25.8372243190725, -93.5078065812231, 36.5003860935195]
+    },
+    {
       "id": "major-aquifers",
       "title": "Major aquifers",
       "service": "geojson",
