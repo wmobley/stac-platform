@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from getpass import getpass
 from pathlib import Path
 
@@ -85,7 +84,7 @@ def build_specs(owner: str, tag: str, base_url: str) -> dict[str, dict]:
     }
 
 
-def upsert_pod(t, spec: dict, *, recreate: bool, start: bool) -> None:
+def upsert_pod(t, spec: dict, *, recreate: bool, start: bool, restart: bool = False) -> None:
     pid = spec["pod_id"]
     exists = True
     try:
@@ -101,16 +100,34 @@ def upsert_pod(t, spec: dict, *, recreate: bool, start: bool) -> None:
     if exists:
         print(f"  [{pid}] updating…")
         t.pods.update_pod(**spec)
+        # update_pod changes the stored spec, but a running pod keeps its old
+        # container + env. Restart so env changes (e.g. STAC_CORS_ORIGINS) apply.
+        if restart:
+            try:
+                t.pods.restart_pod(pod_id=pid)
+                print(f"  [{pid}] restart requested (applying env changes)")
+            except Exception as exc:
+                print(f"  [{pid}] restart failed: {exc}")
+            return
     else:
         print(f"  [{pid}] creating…")
         t.pods.create_pod(**spec)
 
     if start:
+        # A freshly-created pod auto-starts; start_pod only works from STOPPED.
+        # Check status first so a recreate/re-run doesn't spew a scary RuntimeError.
         try:
-            t.pods.start_pod(pod_id=pid)
-            print(f"  [{pid}] start requested")
-        except Exception as exc:
-            print(f"  [{pid}] start skipped: {exc}")
+            status = getattr(t.pods.get_pod(pod_id=pid), "status", None)
+        except Exception:
+            status = None
+        if status and status != "STOPPED":
+            print(f"  [{pid}] already {status}; not starting")
+        else:
+            try:
+                t.pods.start_pod(pod_id=pid)
+                print(f"  [{pid}] start requested")
+            except Exception as exc:
+                print(f"  [{pid}] start skipped: {exc}")
 
 
 def main(argv=None) -> int:
@@ -120,6 +137,8 @@ def main(argv=None) -> int:
     parser.add_argument("--image-tag", default="latest")
     parser.add_argument("--pods", choices=("both", "api", "postgres"), default="both")
     parser.add_argument("--recreate", action="store_true")
+    parser.add_argument("--restart", action="store_true",
+                        help="Restart updated pods so env changes (e.g. STAC_CORS_ORIGINS) take effect.")
     parser.add_argument("--no-start", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -159,7 +178,8 @@ def main(argv=None) -> int:
 
     for key in selected:
         print(key, specs[key])
-        upsert_pod(t, specs[key], recreate=args.recreate, start=not args.no_start)
+        upsert_pod(t, specs[key], recreate=args.recreate, start=not args.no_start,
+                   restart=args.restart)
 
     print("\nDone. Once started:")
     print(f"  API:      {urls['api']}   (health: {urls['api']}/healthz, viewer: {urls['api']}/)")

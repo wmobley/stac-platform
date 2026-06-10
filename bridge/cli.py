@@ -14,10 +14,19 @@ from __future__ import annotations
 import argparse
 import sys
 
-from stacmap.ckan import CkanClient
+# Load .env so local runs pick up PG*/CKAN_* (like pgstac.migrate). In the pod
+# these come from the container env and there's no .env, so this is a no-op.
+try:
+    from dotenv import load_dotenv
 
-from .loader import PgstacWriter
-from .reconcile import reconcile_collection
+    load_dotenv()
+except ImportError:
+    pass
+
+from stacmap.ckan import CkanClient  # noqa: E402  (after dotenv load)
+
+from .loader import PgstacWriter  # noqa: E402
+from .reconcile import reconcile_collection  # noqa: E402
 
 
 def main(argv=None) -> int:

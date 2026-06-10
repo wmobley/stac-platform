@@ -1,0 +1,35 @@
+{
+  "collection": {
+    "id": "subside-context",
+    "title": "SUBSIDE context layers",
+    "description": "Basemap / reference overlays the SUBSIDE map discovers and renders dynamically. Register a WMS, XYZ, vector-tile, or GeoJSON layer here and it appears in the map's Reference panel with no frontend deploy."
+  },
+  "layers": [
+    {
+      "id": "major-aquifers",
+      "title": "Major aquifers",
+      "service": "geojson",
+      "href": "https://services1.arcgis.com/7DRakJXKPEhwv0fM/ArcGIS/rest/services/Z_Statewide_gdb/FeatureServer/1/query?where=1%3D1&outFields=*&outSR=4326&maxAllowableOffset=0.002&geometryPrecision=5&f=geojson",
+      "group": "Hydrogeology",
+      "kind": "Major aquifer",
+      "color": "#1d4ed8",
+      "opacity": 0.35,
+      "default_visible": false,
+      "attribution": "Texas Water Development Board, via ArcGIS",
+      "bbox": [-107.0, 25.5, -93.0, 36.7]
+    },
+    {
+      "id": "minor-aquifers",
+      "title": "Minor aquifers",
+      "service": "geojson",
+      "href": "https://services1.arcgis.com/7DRakJXKPEhwv0fM/ArcGIS/rest/services/Z_Statewide_gdb/FeatureServer/0/query?where=1%3D1&outFields=*&outSR=4326&maxAllowableOffset=0.002&geometryPrecision=5&f=geojson",
+      "group": "Hydrogeology",
+      "kind": "Minor aquifer",
+      "color": "#0d9488",
+      "opacity": 0.35,
+      "default_visible": false,
+      "attribution": "Texas Water Development Board, via ArcGIS",
+      "bbox": [-107.0, 25.5, -93.0, 36.7]
+    }
+  ]
+}

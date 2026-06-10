@@ -16,6 +16,7 @@ granule (CKAN write succeeded, STAC write failed).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 import httpx
@@ -36,28 +37,53 @@ class ReconcileResult:
     skipped: int
 
 
-def _fetch_json(url: str) -> dict:
-    resp = httpx.get(url, timeout=60.0, follow_redirects=True)
+def _fetch_json(url: str, headers: dict | None = None) -> dict:
+    resp = httpx.get(url, timeout=60.0, follow_redirects=True, headers=headers or {})
     resp.raise_for_status()
     return resp.json()
 
 
+def _resource_filename(res: dict) -> str:
+    """Best filename for a CKAN resource. The publisher may set a human-readable
+    ``name`` (e.g. "Run manifest JSON - …"), so fall back to the original filename
+    it recorded, then the URL basename, before the display name."""
+    return (
+        res.get("subside_original_filename")
+        or (res.get("url") or "").rstrip("/").rsplit("/", 1)[-1]
+        or res.get("name")
+        or ""
+    )
+
+
+def _is_json_resource(res: dict) -> bool:
+    fn = _resource_filename(res).lower()
+    fmt = (res.get("format") or "").lower()
+    mt = (res.get("mimetype") or "").lower()
+    return fn.endswith(".json") or fmt == "json" or "json" in mt
+
+
 def _manifest_resource(resources: list[dict]) -> dict | None:
-    """The group's manifest = the .json resource (preferring a *-manifest.json)."""
-    jsons = [r for r in resources if (r.get("name") or "").lower().endswith(".json")]
+    """The group's manifest = the JSON resource (preferring a *manifest*).
+
+    Detection is by real filename / format / mimetype (not the display name),
+    so it works whether the resource was named by file or by human title.
+    """
+    jsons = [r for r in resources if _is_json_resource(r)]
     if not jsons:
         return None
     for r in jsons:
-        if "manifest" in (r.get("name") or "").lower():
+        blob = " ".join(str(r.get(k) or "") for k in
+                        ("subside_original_filename", "name", "url")).lower()
+        if "manifest" in blob:
             return r
     return jsons[0]
 
 
 def _build_assets(granule: Granule, resources: list[dict]) -> dict[str, dict]:
-    """Classify each CKAN resource into a STAC asset by file name."""
+    """Classify each CKAN resource into a STAC asset by its real file name."""
     out: dict[str, dict] = {}
     for res in resources:
-        name = res.get("name") or ""
+        name = _resource_filename(res)
         href = res.get("url")
         if not href:
             continue
@@ -88,16 +114,24 @@ def reconcile_collection(
         granules: list[Granule] = []
         items: list[dict] = []
         skipped = 0
+        # CKAN at ckan.tacc is fronted by Tapis auth, so resource downloads (the
+        # manifest JSON) need the same bearer token as the Action API calls.
+        fetch_headers = CkanClient._headers(getattr(ckan, "token", None))
 
         for item_id, resources in ckan.iter_collection_items(collection_id):
             manifest_res = _manifest_resource(resources)
             if not manifest_res:
+                names = [(r.get("name") or _resource_filename(r)) for r in resources]
+                print(f"  skip {item_id}: no manifest JSON among {names}", file=sys.stderr)
                 skipped += 1  # no manifest -> can't place it in space/time
                 continue
             try:
-                manifest = _fetch_json(manifest_res["url"])
+                manifest = _fetch_json(manifest_res["url"], headers=fetch_headers)
                 granule = granule_from_subside_manifest(manifest, item_id)
-            except Exception:
+            except Exception as exc:
+                print(f"  skip {item_id}: manifest fetch/parse failed "
+                      f"({type(exc).__name__}: {str(exc)[:160]}) url={manifest_res.get('url')}",
+                      file=sys.stderr)
                 skipped += 1
                 continue
             assets = _build_assets(granule, resources)
