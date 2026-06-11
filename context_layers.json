@@ -6,20 +6,6 @@
   },
   "layers": [
     {
-      "id": "satellite",
-      "title": "Satellite Availability",
-      "service": "mvt",
-      "href": "https://subsideapi.pods.portals.tapis.io/api/subside/tiles/satellite/{z}/{x}/{y}.mvt",
-      "group": "SUBSIDE",
-      "role": "availability",
-      "color": "#16a34a",
-      "default_visible": true,
-      "source_layers": ["satellite"],
-      "feature_count": 1226,
-      "style": {"geomType": "Polygon", "color": "#16a34a", "weight": 1, "fillColor": "#16a34a", "fillOpacity": 0.35},
-      "bbox": [-180.0, -15.289224, 180.0, 72.785503]
-    },
-    {
       "id": "texas_counties",
       "title": "Texas Counties",
       "service": "mvt",
@@ -41,6 +27,7 @@
       "kind": "Major aquifer",
       "color": "#1d4ed8",
       "opacity": 0.35,
+      "visible_when": "anon",
       "default_visible": false,
       "attribution": "Texas Water Development Board, via ArcGIS",
       "bbox": [-107.0, 25.5, -93.0, 36.7]
@@ -57,6 +44,22 @@
       "default_visible": false,
       "attribution": "Texas Water Development Board, via ArcGIS",
       "bbox": [-107.0, 25.5, -93.0, 36.7]
+    },
+    {
+      "id": "well-reports",
+      "title": "Water Well Reports (TWDB)",
+      "service": "feature-server",
+      "href": "https://services.twdb.texas.gov/arcgis/rest/services/Public/WellReports/FeatureServer/0",
+      "group": "Hydrogeology",
+      "color": "#b45309",
+      "opacity": 0.9,
+      "default_visible": false,
+      "min_zoom": 9,
+      "query_fields": ["WellReportTrackingNumber", "WellType", "ProposedUse", "County", "WellOwner", "DateOfWellCompletion", "BoreholeDepthFt"],
+      "style": {"geomType": "Point", "color": "#b45309", "radius": 3, "fillColor": "#f59e0b", "fillOpacity": 0.85, "weight": 1},
+      "attribution": "TDLR Submitted Driller's Reports, via Texas Water Development Board ArcGIS",
+      "description": "Water well reports submitted to the Texas Department of Licensing and Regulation (TDLR) from February 2001 to present (~680k points). Loaded viewport-by-viewport from the TWDB FeatureServer; zoom in to county level to see wells.",
+      "bbox": [-106.645556, 25.866112, -93.530555, 36.500278]
     }
   ]
 }

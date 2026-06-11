@@ -39,8 +39,17 @@ CONTEXT_DATETIME = "2020-01-01T00:00:00Z"
 _WORLD_BBOX = [-180.0, -90.0, 180.0, 90.0]
 
 #: Recognized service kinds and the asset media-type each one advertises.
+#:
+#: ``feature-server`` is an Esri ArcGIS *FeatureServer* layer endpoint (e.g.
+#: ``.../FeatureServer/0``). Unlike ``geojson`` (a single static fetch, capped at
+#: the server's maxRecordCount), the SUBSIDE UI consumes it *viewport-driven*:
+#: re-querying the layer's ``/query`` endpoint with the current map-bounds envelope
+#: on each pan/zoom (``f=geojson``), gated by ``min_zoom``. That lets a layer with
+#: far more features than maxRecordCount (e.g. TWDB's 680k well reports) render
+#: only what's in view, without standing up our own tiler.
 _SERVICE_MEDIA_TYPE = {
     "geojson": "application/geo+json",
+    "feature-server": "application/geo+json",
     "wms": "image/png",
     "xyz": "image/png",
     "mvt": "application/vnd.mapbox-vector-tile",
@@ -87,6 +96,10 @@ def _context_hints(spec: dict[str, Any], service: str) -> dict[str, Any]:
         # style). Plain layers omit it.
         "role": spec.get("role"),
         "feature_count": spec.get("feature_count"),
+        # Default-on policy the UI resolves against auth state: "authed" (on only
+        # when logged in), "anon" (on only when logged out), "always", or "never".
+        # Omitted → the plain `default_visible` boolean applies.
+        "visible_when": spec.get("visible_when"),
         "color": spec.get("color"),
         "style": spec.get("style"),
         "opacity": spec.get("opacity"),
@@ -102,6 +115,10 @@ def _context_hints(spec: dict[str, Any], service: str) -> dict[str, Any]:
         "format": spec.get("format"),
         # MVT specifics: the source-layer name(s) VectorGrid styles are keyed by.
         "source_layers": spec.get("source_layers"),
+        # feature-server specifics: the outFields requested per viewport query
+        # (drives the popup), and an optional server-side WHERE filter.
+        "query_fields": spec.get("query_fields"),
+        "where": spec.get("where"),
     })
 
 

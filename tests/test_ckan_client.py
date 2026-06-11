@@ -118,3 +118,65 @@ def test_ckan_api_key_uses_raw_authorization_header():
     assert CkanClient._headers("plain-ckan-key") == {"Authorization": "plain-ckan-key"}
     assert CkanClient._headers("Bearer already") == {"Authorization": "Bearer already"}
     assert CkanClient._headers("") == {}
+
+
+def test_ensure_dataset_scheming_type_and_fields():
+    """A scheming dataset carries its `type`, owner_org override, and schema fields,
+    and is NOT tagged with the bridge's stac_collection extra."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+        if request.url.path.endswith("/package_show"):
+            return httpx.Response(404, json={"success": False, "error": {"__type": "Not Found"}})
+        if request.url.path.endswith("/package_create"):
+            body = _json.loads(request.content)
+            bodies.append(body)
+            return httpx.Response(200, json={"success": True, "result": {"name": body["name"]}})
+        raise AssertionError(f"unexpected CKAN action: {request.url}")
+
+    ckan = CkanClient(url="https://ckan.example", token="k", org="fallback-org",
+                      transport=httpx.MockTransport(handler))
+    try:
+        ckan.ensure_dataset(
+            "my-external", dataset_type="subside_dataset", owner_org="twdb-subside",
+            fields={"title": "T", "private": False, "temporal_coverage_start": "2001-02-01"},
+        )
+    finally:
+        ckan.close()
+    (body,) = bodies
+    assert body["type"] == "subside_dataset"
+    assert body["owner_org"] == "twdb-subside"          # overrides client org
+    assert body["private"] is False
+    assert body["temporal_coverage_start"] == "2001-02-01"
+    assert "extras" not in body                          # un-bridged: no stac_collection
+
+
+def test_link_resource_without_item_id_carries_scheming_fields():
+    """A standalone external resource: no stac_item_id, object fields JSON-encoded."""
+    import json as _json
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/package_show"):
+            return httpx.Response(200, json={"success": True, "result": {"resources": []}})
+        if request.url.path.endswith("/resource_create"):
+            return httpx.Response(200, json={"success": True, "result": {"id": "r1", "url": "u"}})
+        raise AssertionError(f"unexpected CKAN action: {request.url}")
+
+    ckan = CkanClient(url="https://ckan.example", token="k",
+                      transport=httpx.MockTransport(handler))
+    orig = ckan._action_multipart
+    ckan._action_multipart = lambda name, fields, **kw: (sent.append(fields), orig(name, fields, **kw))[1]
+    try:
+        ckan.link_resource(
+            "my-external", "https://svc/FeatureServer/0", name="Layer 0", fmt="Esri REST",
+            extra_fields={"collection_method": "Administrative Record",
+                          "spatial": {"type": "Polygon", "coordinates": []}},
+        )
+    finally:
+        ckan.close()
+    (fields,) = sent
+    assert "stac_item_id" not in fields                  # not a SUBSIDE run
+    assert fields["collection_method"] == "Administrative Record"
+    assert _json.loads(fields["spatial"])["type"] == "Polygon"  # object -> JSON string

@@ -1,0 +1,68 @@
+{
+  "datasets": [
+    {
+      "name": "submitted-drillers-report-database",
+      "type": "dataset",
+      "owner_org": "twdb-subside",
+      "private": false,
+      "dataset_fields": {
+        "title": "Texas Water Well Reports (TDLR Submitted Driller's Reports)",
+        "notes": "The Submitted Driller's Reports Database contains water well reports submitted to the Texas Department of Licensing and Regulation (TDLR) from February 2001 to present (~680,000 statewide point records). Each record locates a reported well and carries attributes such as well type, proposed use, county, owner, completion date, and borehole depth.\n\nPublished by the Texas Water Development Board (TWDB) as a public ArcGIS FeatureServer and linked here as an external reference for the SUBSIDE catalog. It is also registered as the `well-reports` map overlay in the `subside-context` STAC collection (loaded viewport-by-viewport from the FeatureServer). Documentation: https://www.twdb.texas.gov/groundwater/data/drillersdb.asp",
+        "tag_string": "Groundwater,Water Wells,Driller Reports,TDLR,TWDB,Texas",
+        "url": "https://www.twdb.texas.gov/groundwater/data/drillersdb.asp",
+        "license_id": "notspecified",
+        "maintainer": "SUBSIDE (UT Austin / TACC)",
+        "maintainer_email": "spierce@tacc.utexas.edu",
+        "spatial": {"type": "Polygon", "coordinates": [[[-106.645556, 25.866112], [-93.530555, 25.866112], [-93.530555, 36.500278], [-106.645556, 36.500278], [-106.645556, 25.866112]]]},
+        "temporal_coverage_start": "2001-02-01",
+        "temporal_coverage_end": ""
+      },
+      "extras": {
+        "publishing_status": "Public",
+        "program_area": "Groundwater",
+        "categories": "Groundwater",
+        "primary_tags": "Groundwater,Water Wells",
+        "secondary_tags": "TDLR,TWDB,Driller Reports,Texas",
+        "collection_method": "Administrative Record",
+        "collection_method_description": "Water well reports submitted to TDLR by licensed drillers as a regulatory requirement.",
+        "quality_control_level": "Raw/Provisional/Un-reviewed",
+        "quality_assurance_description": "Records reflect driller-submitted reports as received by TDLR; locations are not field-verified.",
+        "update_type": "Automatic",
+        "update_frequency": "Daily",
+        "from_date": "2001-02-01",
+        "to_date": "",
+        "data_contact_email": "spierce@tacc.utexas.edu",
+        "caveats_usage": "Well locations are derived from submitted driller's reports and may be approximate; records reflect reports as submitted to TDLR and have not been field-verified. Coverage begins February 2001, so wells completed earlier are generally not represented.",
+        "coordinate_system": "EPSG:4326",
+        "attribution": "Texas Water Development Board (TWDB) / Texas Department of Licensing and Regulation (TDLR)",
+        "supporting_url": "https://www.twdb.texas.gov/groundwater/data/drillersdb.asp"
+      },
+      "resources": [
+        {
+          "name": "Well Reports (ArcGIS FeatureServer layer 0)",
+          "url": "https://services.twdb.texas.gov/arcgis/rest/services/Public/WellReports/FeatureServer/0",
+          "format": "Esri REST",
+          "fields": {
+            "description": "Point layer of submitted water well reports (TDLR Submitted Driller's Reports, Feb 2001-present; ~680,000 features, EPSG:4326). Query via the ArcGIS REST API (f=geojson / f=json / PBF); maxRecordCount is 2,000, so consumers should page or query by bounding-box envelope."
+          }
+        },
+        {
+          "name": "WellReports FeatureServer (service root)",
+          "url": "https://services.twdb.texas.gov/arcgis/rest/services/Public/WellReports/FeatureServer",
+          "format": "Esri REST",
+          "fields": {
+            "description": "Service root for the TWDB WellReports FeatureServer (service metadata, layer list, and capabilities)."
+          }
+        },
+        {
+          "name": "Submitted Driller's Reports Database (documentation)",
+          "url": "https://www.twdb.texas.gov/groundwater/data/drillersdb.asp",
+          "format": "HTML",
+          "fields": {
+            "description": "TWDB documentation page describing the Submitted Driller's Reports Database, its contents, and access options."
+          }
+        }
+      ]
+    }
+  ]
+}

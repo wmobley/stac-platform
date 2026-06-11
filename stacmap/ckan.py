@@ -24,6 +24,7 @@ and package-level ``extras`` round-trip on the dataset (``stac_collection`` /
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 from collections import OrderedDict
@@ -162,6 +163,52 @@ class CkanClient:
             raise CkanError(f"CKAN package_show failed HTTP {resp.status_code}: {payload}")
         return payload["result"]
 
+    def ensure_dataset(self, name: str, *,
+                       title: str | None = None,
+                       notes: str | None = None,
+                       extras: dict[str, str] | None = None,
+                       tags: list[str] | None = None,
+                       dataset_type: str | None = None,
+                       owner_org: str | None = None,
+                       fields: dict[str, Any] | None = None) -> dict:
+        """Return the dataset named ``name``, creating it (private to ``self.org``) if absent.
+
+        Generic create, shared by per-run datasets (:meth:`ensure_run_dataset`) and
+        standalone external-catalog datasets (e.g. an ArcGIS reference service that
+        isn't a SUBSIDE run). ``extras`` are package-level custom fields; ``tags`` are
+        CKAN free tags.
+
+        For ckanext-scheming datasets, ``dataset_type`` selects the schema (CKAN
+        ``type``, e.g. ``subside_dataset``) and ``fields`` carries the schema's
+        first-class fields (and any plain package keys like ``private``) merged into
+        the create payload. ``owner_org`` overrides the client-level org.
+
+        Idempotent: an existing dataset is returned untouched (re-running does NOT
+        patch metadata — edit via CKAN or package_patch).
+        """
+        existing = self.get_dataset(name)
+        if existing:
+            return existing
+        org = owner_org or self.org
+        if not org:
+            raise CkanError("CKAN_ORG (or owner_org) must be set to create a dataset")
+        payload: dict[str, Any] = {"name": name, "owner_org": org}
+        if dataset_type:
+            payload["type"] = dataset_type
+        if fields:
+            payload.update(fields)
+        if title is not None:
+            payload["title"] = title
+        if notes is not None:
+            payload["notes"] = notes
+        payload.setdefault("title", name)
+        payload.setdefault("notes", "")
+        if extras:
+            payload["extras"] = [{"key": k, "value": v} for k, v in extras.items()]
+        if tags:
+            payload["tags"] = [{"name": t} for t in tags]
+        return self._action_json("package_create", payload)
+
     def ensure_run_dataset(self, collection_id: str, item_id: str, *,
                            title: str | None = None,
                            notes: str | None = None) -> dict:
@@ -171,22 +218,12 @@ class CkanClient:
         carries ``stac_collection`` + ``stac_item_id`` extras so the bridge can find
         every run in a collection and recover its STAC Item id.
         """
-        name = dataset_name(collection_id, item_id)
-        existing = self.get_dataset(name)
-        if existing:
-            return existing
-        if not self.org:
-            raise CkanError("CKAN_ORG must be set to create a dataset")
-        return self._action_json("package_create", {
-            "name": name,
-            "title": title or item_id,
-            "notes": notes or "",
-            "owner_org": self.org,
-            "extras": [
-                {"key": COLLECTION_FIELD, "value": collection_id},
-                {"key": ITEM_ID_FIELD, "value": item_id},
-            ],
-        })
+        return self.ensure_dataset(
+            dataset_name(collection_id, item_id),
+            title=title or item_id,
+            notes=notes,
+            extras={COLLECTION_FIELD: collection_id, ITEM_ID_FIELD: item_id},
+        )
 
     # --- resources (= Assets) -------------------------------------------------
     # Upload/link are idempotent: a re-run patches the existing resource for the
@@ -213,13 +250,27 @@ class CkanClient:
             "resource_create", {"package_id": dataset, **fields}, file_path=file_path
         )
 
-    def link_resource(self, dataset: str, url: str, *, item_id: str,
-                      name: str | None = None, fmt: str | None = None) -> dict:
-        """Register a remote URL as a link-type resource, no upload (upsert)."""
+    def link_resource(self, dataset: str, url: str, *, item_id: str | None = None,
+                      name: str | None = None, fmt: str | None = None,
+                      extra_fields: dict[str, Any] | None = None) -> dict:
+        """Register a remote URL as a link-type resource, no upload (upsert).
+
+        ``item_id`` tags the resource with its STAC item (per-run datasets). Omit it
+        for standalone external-catalog datasets that aren't a SUBSIDE run; the
+        resource is then upserted by ``name`` alone.
+
+        ``extra_fields`` carries scheming resource fields (e.g. ``abstract``,
+        ``collection_method``, ``spatial``); dict/list values are JSON-encoded so
+        object fields like ``spatial`` (GeoJSON) round-trip through the form-encoded
+        Action API.
+        """
         fname = name or url.rsplit("/", 1)[-1]
         existing = self._existing_resource_id(dataset, fname, item_id)
-        fields = dict(name=fname, url=url, format=fmt or _fmt_from_name(fname),
-                      **{ITEM_ID_FIELD: item_id})
+        fields = dict(name=fname, url=url, format=fmt or _fmt_from_name(fname))
+        if item_id is not None:
+            fields[ITEM_ID_FIELD] = item_id
+        for k, v in (extra_fields or {}).items():
+            fields[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
         if existing:
             return self._action_multipart("resource_patch", {"id": existing, **fields})
         return self._action_multipart("resource_create", {"package_id": dataset, **fields})

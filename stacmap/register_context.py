@@ -31,18 +31,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from . import context as C
 from .stac_client import StacClient
 
+# Load .env so local runs pick up STAC_*/TAPIS_* (no-op in the pod, where these come
+# from the container env and there's no .env).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 #: Shipped default specs (the two ArcGIS aquifer overlays the UI used to hardcode).
 DEFAULT_SPECS = Path(__file__).resolve().parents[1] / "context_layers.json"
 
 
-def register(specs: dict, *, stac_client: StacClient | None = None) -> list[str]:
-    """Upsert the context Collection + every layer Item. Returns the layer ids."""
+def register(
+    specs: dict, *, stac_client: StacClient | None = None, prune: bool = True
+) -> list[str]:
+    """Upsert the context Collection + every layer Item. Returns the layer ids.
+
+    The ``subside-context`` collection is fully owned by the specs file, so by
+    default we also prune items that are no longer in it — making registration
+    declarative (e.g. dropping the OPERA "satellite" availability layer here
+    removes it from the map). Pruning is best-effort: a STAC API that doesn't
+    support deletes leaves the stale item in place (the UI hides it regardless).
+    """
     coll_spec = specs.get("collection") or {}
     collection_id = coll_spec.get("id") or C.CONTEXT_COLLECTION_ID
     collection = C.build_context_collection(
@@ -60,6 +79,11 @@ def register(specs: dict, *, stac_client: StacClient | None = None) -> list[str]
             item = C.build_context_item(layer, collection_id=collection_id)
             stac_client.upsert_item(collection_id, item)
             ids.append(item["id"])
+        if prune:
+            keep = set(ids)
+            for existing in stac_client.list_item_ids(collection_id):
+                if existing not in keep and stac_client.delete_item(collection_id, existing):
+                    print(f"pruned context layer no longer in specs: {existing}")
         return ids
     finally:
         if own_client:
@@ -75,8 +99,20 @@ def main(argv=None) -> int:
     )
     args = p.parse_args(argv)
 
+    # The STAC API is Tapis-fronted: prefer an explicit STAC_TOKEN, else mint a Tapis
+    # JWT via password grant (TAPIS_BASE_URL/TAPIS_USERNAME/TAPIS_PASSWORD), sent as a
+    # bearer token — same flow as stacmap.register_external.
+    token = os.environ.get("STAC_TOKEN")
+    if not token:
+        from .tapis_auth import mint_tapis_jwt
+        token = mint_tapis_jwt()
+    client = StacClient(token=token)
+
     specs = json.loads(Path(args.specs).read_text())
-    ids = register(specs)
+    try:
+        ids = register(specs, stac_client=client)
+    finally:
+        client.close()
     print(f"registered {len(ids)} context layer(s) -> collection "
           f"{(specs.get('collection') or {}).get('id') or C.CONTEXT_COLLECTION_ID}: "
           f"{', '.join(ids)}")

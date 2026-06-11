@@ -96,6 +96,36 @@ def test_mvt_item_uses_xyz_rel_with_mvt_media_type():
     assert item["properties"]["subside:context"]["source_layers"] == ["wells"]
 
 
+FEATURE_SERVER_SPEC = {
+    "id": "well-reports",
+    "title": "Water Well Reports (TWDB)",
+    "service": "feature-server",
+    "href": "https://example.com/arcgis/rest/services/Public/WellReports/FeatureServer/0",
+    "group": "Hydrogeology",
+    "min_zoom": 9,
+    "query_fields": ["County", "WellType", "DateOfWellCompletion"],
+    "style": {"geomType": "Point", "color": "#b45309", "radius": 3},
+    "bbox": [-106.6, 25.9, -93.5, 36.5],
+}
+
+
+def test_feature_server_item_is_self_describing_and_has_no_webmap_link():
+    item = C.build_context_item(FEATURE_SERVER_SPEC)
+
+    # Like geojson, a feature-server layer is fetched (viewport-driven) — no
+    # web-map-links rel/extension.
+    assert item["links"] == []
+    assert item["stac_extensions"] == []
+    assert item["assets"]["service"]["href"] == FEATURE_SERVER_SPEC["href"]
+    assert item["assets"]["service"]["type"] == "application/geo+json"
+
+    ctx = item["properties"]["subside:context"]
+    assert ctx["service"] == "feature-server"
+    assert ctx["min_zoom"] == 9
+    assert ctx["query_fields"] == ["County", "WellType", "DateOfWellCompletion"]
+    assert "where" not in ctx  # pruned: not supplied
+
+
 def test_unknown_service_rejected():
     with pytest.raises(ValueError):
         C.build_context_item({"id": "x", "service": "tilejson", "href": "h"})
@@ -138,15 +168,54 @@ def test_register_upserts_collection_then_each_item():
     assert ("PUT", "/collections/subside-context/items/faults") in seen
 
 
+def test_register_prunes_items_no_longer_in_specs():
+    # The collection already holds an item ("satellite") that the specs no longer
+    # list; register() should delete it so the catalog stays declarative.
+    deleted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.method == "GET" and path.endswith("/collections/subside-context"):
+            return httpx.Response(200, json={"id": "subside-context"})  # exists
+        if request.method == "GET" and path.endswith("/items"):
+            return httpx.Response(200, json={"features": [
+                {"id": "major-aquifers"}, {"id": "satellite"},
+            ]})
+        if request.method == "PUT" and "/items/" in path:
+            return httpx.Response(200, json={})
+        if request.method == "DELETE" and "/items/" in path:
+            deleted.append(path.rsplit("/", 1)[-1])
+            return httpx.Response(204)
+        return httpx.Response(404)
+
+    client = StacClient(url="https://stac.example/api/v1", transport=httpx.MockTransport(handler))
+    try:
+        ids = register_context.register(
+            {"collection": {"id": "subside-context"}, "layers": [GEOJSON_SPEC]},
+            stac_client=client,
+        )
+    finally:
+        client.close()
+
+    assert ids == ["major-aquifers"]
+    assert deleted == ["satellite"]  # the orphan was pruned; the kept item was not
+
+
 def test_shipped_seed_specs_build_cleanly():
     specs = json.loads(register_context.DEFAULT_SPECS.read_text())
     items = [C.build_context_item(layer, collection_id=specs["collection"]["id"])
              for layer in specs["layers"]]
+    # The OPERA "satellite" availability layer is intentionally NOT registered as a
+    # map overlay (its frames are too large to use as a run AOI — they time out the
+    # workflow); its availability data drives an in-panel guide instead.
     assert {i["id"] for i in items} == {
-        "satellite", "texas_counties", "major-aquifers", "minor-aquifers",
+        "texas_counties", "major-aquifers", "minor-aquifers", "well-reports",
     }
-    # The OPERA frame layer carries the availability role + an MVT service link.
-    sat = next(i for i in items if i["id"] == "satellite")
-    assert sat["properties"]["subside:context"]["role"] == "availability"
-    assert sat["properties"]["subside:context"]["service"] == "mvt"
-    assert sat["links"][0]["type"] == "application/vnd.mapbox-vector-tile"
+    # The TWDB well-reports overlay is a viewport-driven Esri FeatureServer layer.
+    wells = next(i for i in items if i["id"] == "well-reports")
+    assert wells["properties"]["subside:context"]["service"] == "feature-server"
+    assert wells["properties"]["subside:context"]["min_zoom"] == 9
+    assert wells["links"] == []
+    # Aquifers default on only for anonymous users.
+    major = next(i for i in items if i["id"] == "major-aquifers")
+    assert major["properties"]["subside:context"]["visible_when"] == "anon"
