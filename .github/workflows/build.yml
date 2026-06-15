@@ -36,8 +36,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    name: Unit tests (fast)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package + test tooling
+        run: pip install -e . pytest
+      # Hermetic suite only (pure builders + stubbed clients). The live-STAC
+      # integration script (tests/test_publish_pipelines.py) is excluded.
+      - name: Run fast unit tests
+        run: pytest -m "not integration"
+
   build:
     name: Build ${{ matrix.image }}
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

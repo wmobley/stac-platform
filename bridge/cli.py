@@ -28,6 +28,13 @@ from stacmap.ckan import CkanClient  # noqa: E402  (after dotenv load)
 from .loader import PgstacWriter  # noqa: E402
 from .reconcile import reconcile_collection  # noqa: E402
 
+# Collections whose Items are authored directly via the Transactions API (e.g.
+# `stacmap.register_context` writing the `subside-context` overlays) — NOT rebuilt
+# from per-run CKAN datasets. Reconciling one would find no CKAN run-datasets and
+# prune every directly-authored Item, so the bridge refuses by default. These
+# persist in PgSTAC and are maintained only by their register_* command.
+PROTECTED_COLLECTIONS = frozenset({"subside-context"})
+
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Reconcile CKAN -> PgSTAC (STAC).")
@@ -41,7 +48,18 @@ def main(argv=None) -> int:
                    help="Do not delete STAC items missing from CKAN (backfill-only).")
     p.add_argument("--title", default=None, help="Collection title (optional)")
     p.add_argument("--description", default=None, help="Collection description (optional)")
+    p.add_argument("--force-protected", action="store_true",
+                   help="Allow reconciling a PROTECTED_COLLECTIONS id (e.g. subside-context). "
+                        "Dangerous: prunes directly-authored Items not backed by CKAN run-datasets.")
     args = p.parse_args(argv)
+
+    blocked = set(args.collection) & PROTECTED_COLLECTIONS
+    if blocked and not args.force_protected:
+        print(f"refusing to reconcile protected collection(s) {sorted(blocked)}: their Items are "
+              f"authored via the Transactions API (e.g. stacmap.register_context), not CKAN "
+              f"run-datasets, so a reconcile would prune them. Re-run that register command to "
+              f"update them, or pass --force-protected if you really mean to.", file=sys.stderr)
+        return 2
 
     prune = not (args.no_prune or args.command == "backfill")
     ckan = CkanClient()

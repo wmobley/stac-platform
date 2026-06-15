@@ -20,3 +20,15 @@ stac-publish = "stacmap.publish:main"
 # The reusable library. A Workflows FunctionTask only needs `stacmap`;
 # bridge/stac_api/pgstac are included so `pip install` of the repo is whole.
 packages = ["stacmap", "bridge", "stac_api", "pgstac"]
+
+[tool.pytest.ini_options]
+# The fast suite (test_context / test_mapping / test_ckan_client / test_stac_client)
+# is hermetic — pure builders + stubbed clients, no DB/network — and is the CI gate.
+# test_publish_pipelines.py is a __main__ script (no pytest test fns) needing a live
+# STAC API; run it by hand (see its header). The `integration` marker is reserved
+# for any pytest-style test that needs a running service.
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "integration: needs a live external service (STAC API / CKAN) — not in the fast CI gate",
+]

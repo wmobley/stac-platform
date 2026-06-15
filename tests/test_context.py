@@ -201,21 +201,38 @@ def test_register_prunes_items_no_longer_in_specs():
     assert deleted == ["satellite"]  # the orphan was pruned; the kept item was not
 
 
-def test_shipped_seed_specs_build_cleanly():
-    specs = json.loads(register_context.DEFAULT_SPECS.read_text())
-    items = [C.build_context_item(layer, collection_id=specs["collection"]["id"])
-             for layer in specs["layers"]]
-    # The OPERA "satellite" availability layer is intentionally NOT registered as a
-    # map overlay (its frames are too large to use as a run AOI — they time out the
-    # workflow); its availability data drives an in-panel guide instead.
-    assert {i["id"] for i in items} == {
-        "texas_counties", "major-aquifers", "minor-aquifers", "well-reports",
+def test_build_context_item_service_kinds():
+    """The builder handles each service kind + render hints (project-agnostic).
+
+    Project-specific specs (e.g. SUBSIDE's texas_counties / aquifers / well-reports)
+    now live in the consuming repo at ``subside/stac/context_layers.json`` — not in
+    this generic platform — so we test the *builder* against an inline spec instead
+    of any shipped file.
+    """
+    specs = {
+        "collection": {"id": "demo-context"},
+        "layers": [
+            {"id": "wells", "title": "Wells", "service": "feature-server",
+             "href": "https://example/FeatureServer/0", "min_zoom": 9,
+             "query_fields": ["A", "B"]},
+            {"id": "aquifers", "title": "Aquifers", "service": "geojson",
+             "href": "https://example/query?f=geojson", "visible_when": "anon"},
+            {"id": "tiles", "title": "Tiles", "service": "wms",
+             "href": "https://example/wms", "wms_layers": ["x"]},
+        ],
     }
-    # The TWDB well-reports overlay is a viewport-driven Esri FeatureServer layer.
-    wells = next(i for i in items if i["id"] == "well-reports")
+    items = {
+        layer["id"]: C.build_context_item(layer, collection_id=specs["collection"]["id"])
+        for layer in specs["layers"]
+    }
+
+    # feature-server: viewport-driven, gated by min_zoom, no web-map-links link.
+    wells = items["wells"]
     assert wells["properties"]["subside:context"]["service"] == "feature-server"
     assert wells["properties"]["subside:context"]["min_zoom"] == 9
     assert wells["links"] == []
-    # Aquifers default on only for anonymous users.
-    major = next(i for i in items if i["id"] == "major-aquifers")
-    assert major["properties"]["subside:context"]["visible_when"] == "anon"
+    # geojson: visible_when passthrough, no link.
+    assert items["aquifers"]["properties"]["subside:context"]["visible_when"] == "anon"
+    assert items["aquifers"]["links"] == []
+    # wms: gets a web-map-links link relation.
+    assert any(link.get("rel") == "wms" for link in items["tiles"]["links"])

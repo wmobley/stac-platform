@@ -2,11 +2,16 @@
 
 Some layers the SUBSIDE map references aren't SUBSIDE run products — they are
 third-party services we link to (e.g. TWDB's ArcGIS Well Reports FeatureServer).
-Those still belong in the CKAN catalog so they're discoverable, but they must NOT
-be tagged into a STAC Collection's ``stac_collection`` namespace: the reconcile
-bridge rebuilds a collection from its CKAN run-datasets and *prunes* anything it
-can't reconstruct, which would wipe directly-authored context Items. So these are
-**standalone** datasets carrying only link resources.
+Those belong in the CKAN catalog so they're discoverable. They are registered as
+**standalone CKAN datasets** carrying only link resources, NOT as STAC Items.
+
+Why CKAN-only and not also STAC: these are catalog references, not searchable
+spatiotemporal *products*, so they don't need a STAC Item. (Context *map overlays*
+— including the same services rendered on the map — DO get a STAC Item, via
+``register_context`` into the ``subside-context`` collection; those persist in
+PgSTAC and are safe, because the reconcile bridge only ever reconciles/prunes the
+per-run product collection it is pointed at, e.g. ``--collection subsidence-rates``,
+never ``subside-context`` — see ``bridge.cli``'s guard.)
 
 Field layout mirrors the existing ``twdb-subside`` datasets on
 ckan.tacc.utexas.edu (e.g. ``twdb-groundwater-models``), which use the plain CKAN
@@ -20,7 +25,8 @@ stores them; ``spatial`` is read by ckanext-spatial and surfaces top-level in
 ``package_show``).
 
 The map-overlay side of the same layer is registered separately as a STAC context
-Item — edit ``context_layers.json`` and run ``python -m stacmap.register_context``.
+Item — edit the consuming project's context specs (e.g.
+``subside/stac/context_layers.json``) and run ``python -m stacmap.register_context``.
 
 Specs file (JSON) shape::
 
@@ -45,9 +51,13 @@ Specs file (JSON) shape::
       ]
     }
 
+The specs file is owned by the *consuming project*, not this generic platform —
+e.g. SUBSIDE keeps it at ``subside/stac/external_datasets.json``. ``--specs`` is
+therefore required.
+
 Usage::
 
-    python -m stacmap.register_external --specs external_datasets.json
+    python -m stacmap.register_external --specs /path/to/external_datasets.json
     # honors CKAN_URL / CKAN_TOKEN / CKAN_ORG from the environment (see CkanClient)
 """
 
@@ -69,9 +79,6 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
-#: Shipped default specs (the TWDB Well Reports external service).
-DEFAULT_SPECS = Path(__file__).resolve().parents[1] / "external_datasets.json"
 
 
 def register(specs: dict, *, ckan: CkanClient | None = None) -> list[str]:
@@ -118,8 +125,9 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Register external reference datasets into CKAN.")
     p.add_argument(
         "--specs",
-        default=str(DEFAULT_SPECS),
-        help=f"Path to the external-datasets specs JSON (default: {DEFAULT_SPECS.name}).",
+        required=True,
+        help="Path to the external-datasets specs JSON (lives in the consuming "
+             "project, e.g. subside/stac/external_datasets.json).",
     )
     args = p.parse_args(argv)
 

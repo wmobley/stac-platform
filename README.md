@@ -9,6 +9,17 @@ It was first built for [SUBSIDE](https://github.com/wmobley/modflow-suite) (OPER
 DISP-S1 subsidence rasters) but is deliberately decoupled so any TACC project can
 register its own CKAN dataset as a STAC Collection.
 
+> **Where project specs live:** this repo holds the *engine* (publish, reconcile,
+> the `register_context`/`register_external` CLIs) but **not** any project's data
+> specs. A consuming project owns its context-layer / external-dataset JSON and
+> passes it via `--specs`. For SUBSIDE those live in
+> [`subside/stac/`](https://github.com/wmobley/modflow-suite/tree/main/subside/stac)
+> (see that folder's README for the registration commands and the persistence
+> model). The reconcile **bridge only touches per-run product collections** (e.g.
+> `subsidence-rates`) — it refuses to reconcile directly-authored collections like
+> `subside-context` (see `bridge/cli.py` `PROTECTED_COLLECTIONS`), so
+> API-registered context layers persist in PgSTAC.
+
 ## How it fits together
 
 ```

@@ -21,9 +21,13 @@ Specs file (JSON) shape::
 Each layer's ``service`` is one of ``geojson`` / ``wms`` / ``xyz`` / ``mvt``; see
 :func:`stacmap.context.build_context_item` for the full set of optional fields.
 
+The specs file is owned by the *consuming project*, not this generic platform —
+e.g. SUBSIDE keeps it at ``subside/stac/context_layers.json``. ``--specs`` is
+therefore required.
+
 Usage::
 
-    python -m stacmap.register_context --specs context_layers.json
+    python -m stacmap.register_context --specs /path/to/context_layers.json
     # honors STAC_URL / STAC_TOKEN from the environment (see StacClient)
 """
 
@@ -46,9 +50,6 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
-#: Shipped default specs (the two ArcGIS aquifer overlays the UI used to hardcode).
-DEFAULT_SPECS = Path(__file__).resolve().parents[1] / "context_layers.json"
 
 
 def register(
@@ -91,11 +92,12 @@ def register(
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Register SUBSIDE context layers into STAC.")
+    p = argparse.ArgumentParser(description="Register a project's context layers into STAC.")
     p.add_argument(
         "--specs",
-        default=str(DEFAULT_SPECS),
-        help=f"Path to the context-layers specs JSON (default: {DEFAULT_SPECS.name}).",
+        required=True,
+        help="Path to the context-layers specs JSON (lives in the consuming "
+             "project, e.g. subside/stac/context_layers.json).",
     )
     args = p.parse_args(argv)
 
