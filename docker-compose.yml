@@ -14,7 +14,7 @@ services:
       POSTGRES_PASSWORD: stac
       POSTGRES_DB: stac
     ports:
-      - "5439:5432"          # host 5439 -> container 5432 (avoids a local PG clash)
+      - "${STAC_DB_HOST_PORT:-5439}:5432" # host 5439 -> container 5432 (avoids a local PG clash)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stac -d stac"]
       interval: 3s
@@ -50,11 +50,11 @@ services:
       PGUSER: stac
       PGPASSWORD: stac
       PGSSLMODE: disable        # plaintext is fine inside the compose network
-      STAC_CORS_ORIGINS: "http://localhost:5173,http://localhost:8081"
+      STAC_CORS_ORIGINS: "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5174,http://subside.local:5174,https://subside.local:5174,http://localhost:${STAC_API_HOST_PORT:-8081}"
       PREFIX_PATH: "/api/v1"     # API under /api/v1; React viewer served at /
       STAC_AUTH_DISABLED: "true" # local: writes open (no Tapis token required)
     ports:
-      - "8081:8081"
+      - "${STAC_API_HOST_PORT:-8081}:8081"
     depends_on:
       db:
         condition: service_healthy

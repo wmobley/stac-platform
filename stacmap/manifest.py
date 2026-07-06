@@ -170,6 +170,14 @@ def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec]
         overlay = None
         if manifest.get("frame_id") is not None:
             props["subside:frame_id"] = manifest["frame_id"]
+        # The static reference point the velocities are measured against (auto-picked
+        # anchor, or a supplied/GNSS point). Lets the UI label and plot it.
+        ref = manifest.get("reference") or {}
+        if ref.get("anchor_lat") is not None and ref.get("anchor_lon") is not None:
+            props["subside:reference_lat"] = float(ref["anchor_lat"])
+            props["subside:reference_lon"] = float(ref["anchor_lon"])
+            if ref.get("mode"):
+                props["subside:reference_mode"] = str(ref["mode"])
     else:
         bbox = _bbox_list(manifest.get("bbox"))
         cog_tif = artifacts.get("cog_tif")
