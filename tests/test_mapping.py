@@ -97,6 +97,32 @@ def test_asset_classification():
     assert key == "metadata"
 
 
+def test_non_finite_display_range_is_dropped():
+    """NaN/Infinity stats must never reach the Item -- httpx's strict JSON encoder
+    (allow_nan=False) rejects them outright, crashing the STAC publish PUT."""
+    import math
+
+    key, asset = A.asset_for_resource(
+        "d.tif", "https://ckan/d.tif", display_range={"vmin": float("nan"), "vmax": 1.0},
+    )
+    assert key == "cog"
+    assert "raster:bands" not in asset
+
+    key, asset = A.asset_for_resource(
+        "d.tif", "https://ckan/d.tif", display_range={"vmin": -1.0, "vmax": math.inf},
+    )
+    assert "raster:bands" not in asset
+
+    # A render recipe requires raster:bands statistics, so it's skipped too.
+    item = stac.build_item(
+        granule_from_subside_manifest(MANIFEST, "job-123"),
+        "subsidence-rates",
+        {"cog": asset},
+    )
+    assert "renders" not in item["properties"]
+    assert stac.RASTER_EXT not in item["stac_extensions"]
+
+
 def test_file_extension_fields():
     # size + a bare md5 digest -> file:size (int) + file:checksum (md5 multihash).
     _, cog = A.asset_for_resource(

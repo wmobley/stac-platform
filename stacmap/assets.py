@@ -8,6 +8,7 @@ tilers treat it as a COG.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
@@ -77,10 +78,14 @@ def make_asset(
 ) -> dict[str, Any]:
     """Build a single STAC Asset dict.
 
-    If ``display_range`` (``{"vmin","vmax"}``) is given it is attached as
-    ``raster:bands`` statistics so a tiler can auto-rescale the COG. ``byte_size``
-    and ``checksum`` (a bare hex digest, e.g. from CKAN) populate the File
-    extension's ``file:size`` / ``file:checksum`` when present.
+    If ``display_range`` (``{"vmin","vmax"}``) is given and both values are finite,
+    it is attached as ``raster:bands`` statistics so a tiler can auto-rescale the
+    COG. NaN/Infinity are not valid JSON (httpx's strict encoder rejects them, and
+    RFC 8259 forbids them), so a non-finite value is dropped rather than passed
+    through — a producer's stats bug should degrade to "no rescale hint", not crash
+    the STAC publish. ``byte_size`` and ``checksum`` (a bare hex digest, e.g. from
+    CKAN) populate the File extension's ``file:size`` / ``file:checksum`` when
+    present.
     """
     asset: dict[str, Any] = {"href": href}
     if media_type:
@@ -90,14 +95,16 @@ def make_asset(
     if title:
         asset["title"] = title
     if display_range and "vmin" in display_range and "vmax" in display_range:
-        asset["raster:bands"] = [
-            {
-                "statistics": {
-                    "minimum": display_range["vmin"],
-                    "maximum": display_range["vmax"],
+        vmin, vmax = display_range["vmin"], display_range["vmax"]
+        if math.isfinite(vmin) and math.isfinite(vmax):
+            asset["raster:bands"] = [
+                {
+                    "statistics": {
+                        "minimum": vmin,
+                        "maximum": vmax,
+                    }
                 }
-            }
-        ]
+            ]
     size = _byte_size(byte_size)
     if size is not None:
         asset["file:size"] = size
