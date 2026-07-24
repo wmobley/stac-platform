@@ -97,6 +97,14 @@ class StacClient:
             return
         resp.raise_for_status()
 
+    def get_item(self, collection_id: str, item_id: str) -> dict[str, Any] | None:
+        """Fetch a single item, or None if it (or the collection) doesn't exist."""
+        resp = self._send("GET", f"/collections/{collection_id}/items/{item_id}")
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.json()
+
     def upsert_item(self, collection_id: str, item: dict[str, Any]) -> None:
         """PUT an item (create or replace). Falls back to POST if PUT is unsupported."""
         iid = item["id"]
@@ -104,6 +112,17 @@ class StacClient:
         if resp.status_code == 404:
             # Item does not exist yet and the server requires POST-to-create.
             resp = self._send("POST", f"/collections/{collection_id}/items", json=item)
+        resp.raise_for_status()
+
+    def patch_item(self, collection_id: str, item_id: str, partial: dict[str, Any]) -> None:
+        """PATCH a partial update onto an EXISTING item (JSON Merge Patch --
+        only send the fields you want to change, e.g.
+        ``{"properties": {"subside:location": "..."}}``). Prefer this over
+        get-mutate-`upsert_item` for small edits: PUT expects a complete,
+        clean Item, and re-submitting a GET response verbatim resends
+        server-managed fields (e.g. pgstac-injected self/parent/root/collection
+        `links`) that the API rejects with 400 on write."""
+        resp = self._send("PATCH", f"/collections/{collection_id}/items/{item_id}", json=partial)
         resp.raise_for_status()
 
     def list_item_ids(self, collection_id: str, *, limit: int = 1000) -> list[str]:

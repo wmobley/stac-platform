@@ -19,6 +19,8 @@ import os
 import sys
 from pathlib import Path
 
+from typing import Callable
+
 from . import assets as A
 from . import stac
 from .ckan import CkanClient
@@ -98,15 +100,21 @@ def publish_from_dir(
     manifest_path: str | Path,
     item_id: str,
     files_dir: str | Path,
+    resolve_location: Callable[[list[float]], str | None] | None = None,
     **kwargs,
 ) -> dict:
     """Parse a manifest, find its COG(s)/overlay in ``files_dir`` by name, publish.
 
     Used when the artifacts have been staged locally (the orchestrator fetches the
     tapis:// files into a temp dir; the hosted FunctionTask stages its inputs).
+
+    ``resolve_location``: opt-in best-effort `subside:location` labeling for
+    this publish -- pass ``stacmap.geocode.resolve_location`` to enable it.
+    Defaults to off so tests and ad hoc callers never hit the live Nominatim
+    endpoint unless they explicitly ask for it (see ``stacmap/geocode.py``).
     """
     data = json.loads(Path(manifest_path).read_text())
-    granule, cogs, overlay = parse_manifest(data, item_id)
+    granule, cogs, overlay = parse_manifest(data, item_id, resolve_location=resolve_location)
     files_dir = Path(files_dir)
     cog_files = [(str(files_dir / s.filename), s) for s in cogs if (files_dir / s.filename).exists()]
     overlay_path = None

@@ -66,7 +66,9 @@ def test_parse_werc():
     assert overlay is None                          # WERC has no overlay
     assert g.bbox == [-95.5551, 29.55, -95.3455, 29.75]   # from GeoTIFF bounds
     assert g.start_datetime == "2024-06-01T00:00:00Z"
-    assert g.properties["subside:frame_id"] == 8882
+    # Plural + list, matching H2I's `subside:frame_ids` shape -- the UI's
+    # itemMeta() only reads the plural key, so WERC items need it too.
+    assert g.properties["subside:frame_ids"] == [8882]
 
 
 def test_granule_from_manifest():

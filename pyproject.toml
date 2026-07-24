@@ -22,8 +22,10 @@ stac-publish = "stacmap.publish:main"
 packages = ["stacmap", "bridge", "stac_api", "pgstac"]
 
 [tool.pytest.ini_options]
-# The fast suite (test_context / test_mapping / test_ckan_client / test_stac_client)
-# is hermetic — pure builders + stubbed clients, no DB/network — and is the CI gate.
+# The fast suite (test_context / test_mapping / test_ckan_client / test_stac_client /
+# test_geocode) is hermetic — pure builders + stubbed clients, no DB/network — and is
+# the CI gate. test_geocode.py mocks Nominatim via httpx.MockTransport; it never hits
+# the live endpoint.
 # test_publish_pipelines.py is a __main__ script (no pytest test fns) needing a live
 # STAC API; run it by hand (see its header). The `integration` marker is reserved
 # for any pytest-style test that needs a running service.

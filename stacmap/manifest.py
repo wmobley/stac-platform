@@ -25,7 +25,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass
@@ -91,7 +91,12 @@ def _bbox_list(bbox: dict | list | None) -> list[float]:
 
 
 def granule_from_subside_manifest(manifest: dict, item_id: str) -> Granule:
-    """Normalize a SUBSIDE run/preflight manifest dict into a :class:`Granule`."""
+    """Normalize a SUBSIDE run/preflight manifest dict into a :class:`Granule`.
+
+    Not on the live publish path: all three Tapis pipelines call
+    ``publish_from_dir``/``publish_item`` (``publish.py``), which use
+    ``parse_manifest`` below. Only ``load_granule`` and tests call this one.
+    """
     config = manifest.get("config") or {}
     start = _rfc3339_from_date(config.get("start_date"))
     end = _rfc3339_from_date(config.get("end_date"))
@@ -131,7 +136,12 @@ def _range(pair) -> dict[str, float] | None:
     return None
 
 
-def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec], str | None]:
+def parse_manifest(
+    manifest: dict,
+    item_id: str,
+    *,
+    resolve_location: Callable[[list[float]], str | None] | None = None,
+) -> tuple[Granule, list[CogSpec], str | None]:
     """Normalize either SUBSIDE manifest shape into (Granule, COGs, overlay filename).
 
     Auto-detects:
@@ -142,6 +152,14 @@ def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec]
       * **WERC** (``werc-run-manifest.json``): bbox from the GeoTIFF ``bounds``;
         two COGs — cumulative (``clip_range_mm``) and velocity
         (``p02_p98_mm_per_year``); no overlay.
+
+    ``resolve_location``, if given, is called once with the resolved bbox and
+    its return value (or None) is stored as ``subside:location``. Opt-in and
+    keyword-only so this function stays pure/offline by default (no network),
+    which the existing unit tests rely on -- live publishing passes
+    ``stacmap.geocode.resolve_location`` explicitly (see ``publish.py``). Any
+    exception it raises is swallowed; a location name is a best-effort label,
+    never a reason to fail a publish.
     """
     artifacts = manifest.get("artifacts") or {}
     config = manifest.get("config") or {}
@@ -169,7 +187,10 @@ def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec]
                                 display_range=_range(vel.get("p02_p98_mm_per_year"))))
         overlay = None
         if manifest.get("frame_id") is not None:
-            props["subside:frame_id"] = manifest["frame_id"]
+            # Plural key, single-element list: matches H2I's `subside:frame_ids`
+            # below so `itemMeta()` in the UI (which only reads the plural key)
+            # sees frame info for WERC/velocity items too.
+            props["subside:frame_ids"] = [manifest["frame_id"]]
         # The static reference point the velocities are measured against (auto-picked
         # anchor, or a supplied/GNSS point). Lets the UI label and plot it.
         ref = manifest.get("reference") or {}
@@ -190,6 +211,17 @@ def parse_manifest(manifest: dict, item_id: str) -> tuple[Granule, list[CogSpec]
             props["subside:frame_ids"] = manifest["frame_ids"]
         if manifest.get("product_count") is not None:
             props["subside:product_count"] = manifest["product_count"]
+
+    # Single insertion point for both branches, so WERC and H2I get identical
+    # location-resolution behavior (see the docstring above for why this is
+    # opt-in rather than always-on).
+    if resolve_location is not None:
+        try:
+            location = resolve_location(bbox)
+        except Exception:
+            location = None
+        if location:
+            props["subside:location"] = location
 
     granule = Granule(
         item_id=item_id, bbox=bbox,
