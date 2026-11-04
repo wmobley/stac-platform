@@ -115,6 +115,10 @@ def write_rollback_manifest(path: Path, rows: list[dict]) -> None:
     }, indent=2, sort_keys=True))
 
 
+def _norm(value):
+    return None if value in (None, "") else str(value)
+
+
 def patch_and_verify(client, resource: dict, value: str | None) -> dict:
     """Minimal JSON patch of the field, then read back and verify nothing else moved.
 
@@ -123,7 +127,9 @@ def patch_and_verify(client, resource: dict, value: str | None) -> dict:
     client._action_json("resource_patch", {"id": resource["id"], STDVAR_FIELD: value or ""})
     after = client._action_json("resource_show", {"id": resource["id"]})
     for field in UNCHANGED_FIELDS:
-        if after.get(field) != resource.get(field):
+        # CKAN returns ``size`` as int from package_search and str from
+        # resource_show; compare normalised text so a type flip is not a change.
+        if _norm(after.get(field)) != _norm(resource.get(field)):
             raise VerificationError(
                 f"{resource['id']}: {field} changed {resource.get(field)!r} -> {after.get(field)!r}")
     if (after.get(STDVAR_FIELD) or "") != (value or ""):
@@ -148,6 +154,12 @@ def rollback(client, manifest_path: Path) -> int:
     n = 0
     for entry in data["resources"]:
         pre = entry["pre_image"]
+        # Only undo our own write: a value a later publish set stays.
+        current = client._action_json("resource_show", {"id": pre["id"]})
+        if (current.get(STDVAR_FIELD) or "") != (entry.get("new_value") or ""):
+            print(f"[kept] {entry['dataset']} :: {pre['id']} has a newer value "
+                  f"{current.get(STDVAR_FIELD)!r}; not restoring")
+            continue
         patch_and_verify(client, pre, pre.get(STDVAR_FIELD))
         n += 1
         print(f"[restored] {entry['dataset']} :: {pre['id']}")

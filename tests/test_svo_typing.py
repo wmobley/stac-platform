@@ -138,6 +138,9 @@ class _Mock:
     def _action_json(self, name, payload):
         self.actions.append((name, payload))
         if name == "resource_show":
+            # A list of answers is consumed in order (pre-check, then read-back).
+            if isinstance(self.after, list):
+                return self.after.pop(0) if len(self.after) > 1 else self.after[0]
             return self.after
         return {}
 
@@ -186,7 +189,24 @@ def test_apply_writes_only_set_rows():
 def test_rollback_restores_or_clears(tmp_path):
     pre = _res()  # had no field -> cleared
     p = tmp_path / "rb.json"
-    p.write_text(json.dumps({"resources": [{"dataset": "d", "pre_image": pre}]}))
-    m = _Mock(after=dict(pre))
+    p.write_text(json.dumps({"resources": [{"dataset": "d", "pre_image": pre, "new_value": "v"}]}))
+    # pre-check sees our write still in place; read-back after the patch sees it cleared
+    m = _Mock(after=[{**pre, "mint_standard_variables": "v"}, dict(pre)])
     assert B.rollback(m, p) == 1
-    assert m.actions[0] == ("resource_patch", {"id": "r1", "mint_standard_variables": ""})
+    assert m.actions[0][0] == "resource_show"  # current value is checked first
+    assert m.actions[1] == ("resource_patch", {"id": "r1", "mint_standard_variables": ""})
+
+
+def test_rollback_keeps_a_newer_value(tmp_path):
+    pre = _res()
+    p = tmp_path / "rb.json"
+    p.write_text(json.dumps({"resources": [{"dataset": "d", "pre_image": pre, "new_value": "v"}]}))
+    m = _Mock(after={**pre, "mint_standard_variables": "later-publish"})
+    assert B.rollback(m, p) == 0
+    assert [a[0] for a in m.actions] == ["resource_show"]
+
+
+def test_verify_tolerates_size_type_flip():
+    pre = {**_res(), "size": 123}
+    m = _Mock(after={**pre, "size": "123", "mint_standard_variables": "v"})
+    B.patch_and_verify(m, pre, "v")  # must not raise
