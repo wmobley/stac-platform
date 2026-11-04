@@ -3,6 +3,14 @@
 Single source of the publish logic, reused by the Tapis Workflows ``stac-publish``
 FunctionTask (pip-installs this package) and any CLI / orchestrator caller.
 
+Standard-variable typing: callers may pass ``role_variables``, a mapping from a
+SUBSIDE **asset key** (the ``subside_asset_key`` CKAN field / ``CogSpec.key``:
+``cog``, ``cumulative``, ``velocity``, ``overlay``, ``metadata``, ``source``) to
+standard-variable short names. The matching list is written to the resource's
+``mint_standard_variables`` field. (``subside_asset_role`` is ``data`` for every
+COG, so it cannot tell cumulative from velocity.) stacmap hardcodes no names:
+the default is an empty mapping and nothing is written.
+
 Handles both SUBSIDE pipelines via :func:`stacmap.manifest.parse_manifest`:
   * **H2I** — one displacement COG + a PNG overlay.
   * **WERC** — two COGs (cumulative + velocity), each with its own value range.
@@ -39,9 +47,21 @@ def publish_item(
     stac_client: StacClient | None = None,
     collection_title: str | None = None,
     collection_description: str | None = None,
+    role_variables: dict[str, list[str]] | None = None,
 ) -> dict:
-    """Upload the given local files to CKAN, then build + upsert the STAC Item."""
+    """Upload the given local files to CKAN, then build + upsert the STAC Item.
+
+    ``role_variables`` maps an asset key to standard-variable short names (see
+    module docstring). The kwarg is only forwarded to the CKAN client when an
+    asset has a mapping, so custom clients without it keep working.
+    """
     ckan = ckan or CkanClient()
+    role_variables = role_variables or {}
+
+    def _typed(key: str) -> dict:
+        names = role_variables.get(key)
+        return {"standard_variables": list(names)} if names else {}
+
     item_id = granule.item_id
     # One CKAN dataset per run (= one STAC Item), tagged with this collection so
     # the bridge can regroup runs into the (unchanged) STAC Collection.
@@ -53,7 +73,8 @@ def publish_item(
 
     item_assets: dict[str, dict] = {}
     for local_path, spec in cog_files:
-        res = ckan.upload_resource(dataset_name, str(local_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(local_path), item_id=item_id,
+                                  **_typed(spec.key))
         item_assets[spec.key] = A.make_asset(
             res["url"], title=spec.title or spec.filename,
             media_type=A.COG_MEDIA_TYPE, roles=["data", "visual"],
@@ -61,21 +82,24 @@ def publish_item(
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if overlay_path:
-        res = ckan.upload_resource(dataset_name, str(overlay_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(overlay_path), item_id=item_id,
+                                  **_typed("overlay"))
         item_assets["overlay"] = A.make_asset(
             res["url"], title=os.path.basename(str(overlay_path)),
             media_type=A.PNG_MEDIA_TYPE, roles=["overlay", "visual"],
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     if manifest_path:
-        res = ckan.upload_resource(dataset_name, str(manifest_path), item_id=item_id)
+        res = ckan.upload_resource(dataset_name, str(manifest_path), item_id=item_id,
+                                  **_typed("metadata"))
         item_assets["metadata"] = A.make_asset(
             res["url"], title="manifest", media_type=A.JSON_MEDIA_TYPE, roles=["metadata"],
             byte_size=res.get("size"), checksum=res.get("hash"),
         )
     # Source NetCDFs: link-only resources -> `source` link assets (back-populatable).
     for i, url in enumerate(granule.source_urls):
-        res = ckan.link_resource(dataset_name, url, item_id=item_id)
+        res = ckan.link_resource(dataset_name, url, item_id=item_id,
+                                **_typed("source"))
         key = "source" if i == 0 else f"source_{i:04d}"
         item_assets[key] = A.make_asset(
             res.get("url", url), title=os.path.basename(url),
@@ -112,6 +136,9 @@ def publish_from_dir(
     this publish -- pass ``stacmap.geocode.resolve_location`` to enable it.
     Defaults to off so tests and ad hoc callers never hit the live Nominatim
     endpoint unless they explicitly ask for it (see ``stacmap/geocode.py``).
+
+    ``role_variables`` (asset key -> standard-variable names) is forwarded via
+    ``**kwargs`` to :func:`publish_item`.
     """
     data = json.loads(Path(manifest_path).read_text())
     granule, cogs, overlay = parse_manifest(data, item_id, resolve_location=resolve_location)

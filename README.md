@@ -78,6 +78,21 @@ python -m stacmap.publish \
 python -m bridge.cli reconcile --dataset subsidence-rates
 ```
 
+## Typing resources with standard variables
+
+`stacmap.publish.publish_item` / `publish_from_dir` accept an optional
+`role_variables` mapping from a SUBSIDE **asset key** to standard-variable short
+names; the list is written (comma-joined) to the CKAN resource field
+`mint_standard_variables`. The key is the same value stored in the resource's
+`subside_asset_key` (`cog`, `cumulative`, `velocity`, `overlay`, `metadata`,
+`source`) -- not `subside_asset_role`, which is `data` for every COG. stacmap
+hardcodes no names; the default is empty and nothing is written. The pipelines
+pass `{"cog": ["land_surface__displacement"]}` (H2I) and
+`{"cumulative": ["land_surface__displacement"], "velocity": ["land_surface__displacement_rate"]}` (WERC).
+
+Existing datasets are typed with `scripts/backfill_svo_fields.py` (dry-run by
+default; `--apply --yes` writes; `--canary <dataset>`; `--rollback <manifest>`).
+
 ## Testing the API
 
 **No-dependency unit tests** (pure mapping logic — no DB/CKAN/network):

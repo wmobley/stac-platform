@@ -33,6 +33,7 @@ from typing import Any, Iterator
 import httpx
 
 ITEM_ID_FIELD = "stac_item_id"
+STDVAR_FIELD = "mint_standard_variables"   # comma-joined SVO short names
 COLLECTION_FIELD = "stac_collection"
 
 # CKAN dataset names: lowercase, 2-100 chars, only [a-z0-9_-].
@@ -238,12 +239,19 @@ class CkanClient:
         return None
 
     def upload_resource(self, dataset: str, file_path: str, *, item_id: str,
-                        name: str | None = None, fmt: str | None = None) -> dict:
-        """Upload a local file as a resource tagged with ``stac_item_id`` (upsert)."""
+                        name: str | None = None, fmt: str | None = None,
+                        standard_variables: list[str] | None = None) -> dict:
+        """Upload a local file as a resource tagged with ``stac_item_id`` (upsert).
+
+        ``standard_variables`` (short names, e.g. ``land_surface__displacement``)
+        are written as the comma-joined ``mint_standard_variables`` resource field.
+        """
         fname = name or os.path.basename(file_path)
         existing = self._existing_resource_id(dataset, fname, item_id)
         fields = dict(name=fname, format=fmt or _fmt_from_name(fname),
                       **{ITEM_ID_FIELD: item_id})
+        if standard_variables:
+            fields[STDVAR_FIELD] = ",".join(standard_variables)
         if existing:
             return self._action_multipart("resource_patch", {"id": existing, **fields}, file_path=file_path)
         return self._action_multipart(
@@ -252,7 +260,8 @@ class CkanClient:
 
     def link_resource(self, dataset: str, url: str, *, item_id: str | None = None,
                       name: str | None = None, fmt: str | None = None,
-                      extra_fields: dict[str, Any] | None = None) -> dict:
+                      extra_fields: dict[str, Any] | None = None,
+                      standard_variables: list[str] | None = None) -> dict:
         """Register a remote URL as a link-type resource, no upload (upsert).
 
         ``item_id`` tags the resource with its STAC item (per-run datasets). Omit it
@@ -271,6 +280,8 @@ class CkanClient:
             fields[ITEM_ID_FIELD] = item_id
         for k, v in (extra_fields or {}).items():
             fields[k] = json.dumps(v) if isinstance(v, (dict, list)) else v
+        if standard_variables:
+            fields[STDVAR_FIELD] = ",".join(standard_variables)
         if existing:
             return self._action_multipart("resource_patch", {"id": existing, **fields})
         return self._action_multipart("resource_create", {"package_id": dataset, **fields})
