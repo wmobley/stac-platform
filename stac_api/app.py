@@ -27,7 +27,12 @@ from . import _pods_tls
 # asyncpg direct-TLS (+ALPN) for the Tapis pods Postgres tunnel; no-op locally.
 _pods_tls.apply()
 
-from stac_fastapi.pgstac.app import app  # noqa: E402  (after env mapping + patch)
+try:  # stac-fastapi-pgstac < 7 exposes a module-level ``app``
+    from stac_fastapi.pgstac.app import app  # noqa: E402  (after env mapping + patch)
+except ImportError:  # >= 7 only ships the ``create_app`` factory
+    from stac_fastapi.pgstac.app import create_app  # noqa: E402
+
+    app = create_app()
 
 _WRITE_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 # Write (Transactions) routes live under <prefix>/collections.

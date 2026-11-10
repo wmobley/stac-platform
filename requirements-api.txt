@@ -3,7 +3,7 @@
 # install the same set.)
 
 # STAC API server + its PgSTAC backend
-stac-fastapi-pgstac>=3.0.0
+stac-fastapi-pgstac>=3.0.0,<8
 pypgstac[psycopg]>=0.8.5
 uvicorn[standard]>=0.30
 # stac-fastapi pulls fastapi/pydantic, but pin the floor we rely on:
